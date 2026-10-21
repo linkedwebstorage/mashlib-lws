@@ -139,6 +139,31 @@ export class LwsClient {
     return response.json()
   }
 
+  /** Webhook subscriptions at the notification service: [{ url, topic, inbox, … }]. */
+  async subscriptions (endpoint) {
+    const response = await this.fetch(endpoint, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    const page = await response.json()
+
+    return Promise.all((page.items ?? []).map(async item => {
+      const url = new URL(item.id, endpoint).href
+      const doc = await this.fetch(url, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+      return doc.ok ? { ...(await doc.json()), url } : { url }
+    }))
+  }
+
+  /** Subscribe `inbox` to changes of `topic` (URLs in this storage). Returns the server's answer. */
+  async subscribe (endpoint, { topic, inbox, expires }) {
+    const response = await this.fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/lws+json' }, body: JSON.stringify({ '@context': ['https://www.w3.org/ns/lws/v1'], type: 'WebhookSubscription', topic, inbox, ...(expires ? { expires } : {}) }) })
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    return response.json()
+  }
+
   /** GET a data resource: { body, contentType, etag }. */
   async get (url, accept) {
     const response = await this.fetch(url, accept ? { headers: { accept } } : {})

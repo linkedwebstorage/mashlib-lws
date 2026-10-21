@@ -180,6 +180,53 @@ try {
   await page.evaluate(() => [...document.querySelectorAll('lws-shell .grants li')].filter(l => /did:key:z6MkSmokeTest/.test(l.textContent)).forEach(l => l.querySelector('button.revoke').click()))
   await page.waitFor(() => ![...document.querySelectorAll('lws-shell .grants li')].some(l => /z6MkSmokeTest/.test(l.textContent)), { timeout: 15000 }).catch(() => {})
 
+  // Live updates: the shell polls the current document's ETag and reloads on a change
+  // made elsewhere; during an edit it only says so.
+  const listTxt = `${STORAGE}notes/list.txt`
+  const putElsewhere = async (body) => {
+    const etag = (await fetch(listTxt, { method: 'HEAD' })).headers.get('etag')
+
+    return (await fetch(listTxt, { method: 'PUT', headers: { 'content-type': 'text/plain', 'if-match': etag }, body })).status
+  }
+
+  await page.evaluate((u) => { location.hash = u }, `${STORAGE}notes/`) // away from list.txt (the sharing view sits on it), then back
+  await page.waitFor(() => !!document.querySelector('lws-shell tbody'), { timeout: 15000 })
+  await page.evaluate((u) => { location.hash = u }, listTxt)
+  await page.waitFor(() => !!document.querySelector('lws-shell pre'), { timeout: 15000 })
+  check(`a change made elsewhere is accepted (${await putElsewhere('milk\neggs\nchanged elsewhere\nlive')})`, true)
+  const live = await page.waitFor(() => /live$/.test(document.querySelector('lws-shell pre')?.textContent ?? ''), { timeout: 15000 }).catch(() => false)
+  check('the shell picks it up without navigation (polling)', live === true)
+  await page.evaluate(() => document.querySelector('lws-shell #edit').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell textarea'), { timeout: 5000 })
+  await putElsewhere('milk\neggs\nchanged elsewhere')
+  const warned = await page.waitFor(() => !!document.querySelector('lws-shell #changed'), { timeout: 15000 }).catch(() => false)
+  check('while editing, a server-side change is announced, not applied', warned === true && await page.evaluate(() => !!document.querySelector('lws-shell textarea')))
+  await page.evaluate(() => document.querySelector('lws-shell #changed button').click())
+  await page.waitFor(() => !document.querySelector('lws-shell textarea') && /elsewhere$/.test(document.querySelector('lws-shell pre')?.textContent ?? ''), { timeout: 15000 }).catch(() => {})
+  check('Reload shows the server version', await page.evaluate(() => /elsewhere$/.test(document.querySelector('lws-shell pre')?.textContent ?? '')))
+
+  // Inbox: subscribe the storage's inbox container to list.txt; a change is delivered
+  // there by the server (webhook) and the Inbox view lists it.
+  await page.evaluate(() => document.querySelector('lws-shell #inbox').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell #subscribe'), { timeout: 15000 })
+  await page.evaluate((t) => { const f = document.querySelector('lws-shell #subscribe'); f.querySelector('[name=topic]').value = t; f.requestSubmit() }, listTxt)
+  const subscribed = await page.waitFor(() => { const li = [...document.querySelectorAll('lws-shell .subscriptions li')]; return li.some(l => /notes\/list\.txt/.test(l.textContent)) }, { timeout: 15000 }).catch(() => false)
+  check('subscribing the inbox to list.txt lists the subscription', subscribed === true)
+  check('the inbox container exists', (await fetch(`${STORAGE}inbox/`, { headers: { accept: 'application/lws+json' } })).ok)
+  await putElsewhere('milk\neggs\nchanged elsewhere\nnotified')
+  let delivered = false
+  for (let i = 0; i < 10 && !delivered; i++) {
+    await new Promise(r => setTimeout(r, 1500))
+    await page.evaluate(() => document.querySelector('lws-shell #inbox').click())
+    delivered = await page.waitFor(() => [...document.querySelectorAll('lws-shell .notifications li')].some(l => /Update/.test(l.textContent) && /notes\/list\.txt/.test(l.textContent)), { timeout: 3000 }).catch(() => false)
+  }
+  check('the change is delivered to the inbox and shown as an Update notification', delivered === true)
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell .notifications li button.dismiss')].forEach(b => b.click()))
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell .subscriptions li button.unsubscribe')].forEach(b => b.click()))
+  await page.waitFor(() => !document.querySelector('lws-shell .subscriptions li'), { timeout: 15000 }).catch(() => {})
+  check('unsubscribed', await page.evaluate(() => !document.querySelector('lws-shell .subscriptions li')))
+  await putElsewhere('milk\neggs\nchanged elsewhere')
+
   // A JSON-LD resource written through the store is updated with a JSON merge patch
   // of just the changed keys, not a whole-document PUT.
   const jsonld = await page.evaluate(async (storage) => {

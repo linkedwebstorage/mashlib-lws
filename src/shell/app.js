@@ -85,6 +85,9 @@ const paneContext = {
 
 // Panes that label everything; shown, but never the default choice.
 const GENERIC = new Set(['default', 'internal', 'ui', 'sharing', 'source', 'n3', 'RDFXML', 'dataContents', 'humanReadable', 'tableOfClass', 'form', 'home'])
+const POLL_MS = 5000
+const parentOf = (url) => new URL('.', url.endsWith('/') ? url.slice(0, -1) : url).href
+const nameOf = (url) => decodeURIComponent((url.endsWith('/') ? url.slice(0, -1) : url).split('/').pop())
 const minting = () => registry.list.filter(p => typeof p.mintNew === 'function' && !p.global)
 
 export class LwsShell extends LitElement {
@@ -98,6 +101,8 @@ export class LwsShell extends LitElement {
     view: { state: true }, // 'native' | 'pane' | 'search'
     search: { state: true },
     sharing: { state: true },
+    inbox: { state: true },
+    changed: { state: true },
     paneName: { state: true },
     editing: { state: true },
   }
@@ -120,6 +125,143 @@ export class LwsShell extends LitElement {
     this.available = []
     this.search = null // { types, selected, results, text } while the search view is open
     this.sharing = null // { grants, requests } for the current resource while the sharing view is open
+    this.inbox = null // { url, items, subscriptions } while the inbox view is open
+    this.changed = false // the current document changed on the server while shown
+  }
+
+  // Live updates. LWS notifies by webhook, which a page cannot receive, so the shell
+  // polls the current document's ETag (HEAD, cheap) every POLL_MS while visible and
+  // reloads the view on a change — unless an edit is in progress, when it just says so.
+  startPolling () {
+    this.stopPolling()
+    this.pollTimer = setInterval(() => { if (!document.hidden) this.poll() }, POLL_MS)
+  }
+
+  stopPolling () {
+    clearInterval(this.pollTimer)
+    this.pollTimer = null
+  }
+
+  async poll () {
+    const url = this.docUrl
+
+    if (!url || !isLws(url) || this.polling) return
+
+    this.polling = true
+
+    try {
+      const head = await client.fetch(url, { method: 'HEAD', headers: isLwsContainer(url) ? { accept: 'application/lws+json' } : {} })
+      const etag = head.headers.get('etag')
+      const known = this.listing?.etag ?? this.resource?.etag ?? store.fetcher.__lwsEtags?.get(url)
+
+      if (!head.ok || !etag || !known || etag === known || url !== this.docUrl) return
+      if (this.editing) { this.changed = true; return }
+
+      this.changed = false
+
+      if (this.view === 'pane') {
+        this.paneElement = null
+        await this.mountPane(this.paneName)
+      } else if (this.view === 'native') {
+        await this.open(this.url)
+      } else {
+        store.fetcher.__lwsEtags?.set(url, etag)
+      }
+    } catch {
+      // next tick
+    } finally {
+      this.polling = false
+    }
+  }
+
+  // Inbox: a container in the storage (<storage>inbox/ unless localStorage
+  // 'lws-inbox' says otherwise) that webhook subscriptions deliver to. The view lists
+  // the notifications in it, newest first, and subscribes the inbox to a resource.
+  get inboxUrl () {
+    let url = null
+
+    try { url = localStorage.getItem('lws-inbox') } catch {}
+
+    return url || `${this.storage}inbox/`
+  }
+
+  async openInbox () {
+    this.view = 'inbox'
+    this.error = null
+    this.inbox = { url: this.inboxUrl, items: [], subscriptions: [] }
+
+    try {
+      let listing
+
+      try {
+        listing = await client.container(this.inbox.url)
+      } catch (error) {
+        if (error.status !== 404) throw error
+        listing = null
+      }
+
+      const docs = listing ? await Promise.all(listing.items.filter(i => !i.container).map(async item => {
+        try {
+          const response = await client.fetch(item.url, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+          return response.ok ? { url: item.url, modified: item.modified, ...(await response.json()) } : null
+        } catch { return null }
+      })) : []
+      const services = LwsClient.services(this.description)
+      const subscriptions = services.NotificationService ? await client.subscriptions(services.NotificationService).catch(() => []) : []
+
+      this.inbox = { url: this.inbox.url, exists: !!listing, items: docs.filter(Boolean).sort((a, b) => String(b.activity?.published ?? b.modified ?? '').localeCompare(String(a.activity?.published ?? a.modified ?? ''))), subscriptions }
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  // Subscribe the inbox to the current resource's changes (or any URL given).
+  async subscribe (topic) {
+    const services = LwsClient.services(this.description)
+
+    if (!services.NotificationService) { this.error = 'This storage advertises no notification service'; return }
+
+    try {
+      if (!this.inbox?.exists) await client.create(parentOf(this.inboxUrl), { slug: nameOf(this.inboxUrl), container: true }).catch(error => { if (error.status !== 409) throw error })
+      await client.subscribe(services.NotificationService, { topic: [topic], inbox: this.inboxUrl })
+      await this.openInbox()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async unsubscribe (subscription) {
+    try {
+      await client.remove(subscription.url)
+      await this.openInbox()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  renderInbox () {
+    const { url, items, subscriptions, exists } = this.inbox ?? { url: this.inboxUrl, items: [], subscriptions: [] }
+    const rel = (u) => (u ?? '').replace(this.storage, '') || '/'
+
+    return html`
+      <section class="inbox">
+        <p class="meta">Inbox: <a href="#${url}">${rel(url)}</a>${exists === false ? ' (not created yet; subscribing creates it)' : ''} — notifications the storage delivers to it (webhook subscriptions).</p>
+        <h3>Notifications (${items.length})</h3>
+        ${items.length ? html`<ul class="notifications">${items.map(n => html`<li>
+          <b>${[].concat(n.activity?.type ?? n.type ?? []).join(', ')}</b>
+          ${n.activity?.object?.id ? html`<a href="#${n.activity.object.id}">${rel(n.activity.object.id)}</a>` : nothing}
+          <span class="meta">${n.activity?.published ? new Date(n.activity.published).toLocaleString() : ''}</span>
+          <button class="dismiss" @click=${() => client.remove(n.url).then(() => this.openInbox()).catch(e => { this.error = e.message })}>Dismiss</button>
+        </li>`)}</ul>` : html`<p class="meta">Nothing yet.</p>`}
+        <h3>Subscriptions (${subscriptions.length})</h3>
+        ${subscriptions.length ? html`<ul class="subscriptions">${subscriptions.map(sub => html`<li>${[].concat(sub.topic ?? []).map(rel).join(', ')} → ${rel(sub.inbox)} <button class="unsubscribe" @click=${() => this.unsubscribe(sub)}>Unsubscribe</button></li>`)}</ul>` : html`<p class="meta">None.</p>`}
+        <form id="subscribe" @submit=${(e) => { e.preventDefault(); this.subscribe(e.target.querySelector('[name=topic]').value.trim()) }}>
+          <input name="topic" aria-label="Resource to watch" size="60" .value=${this.docUrl}>
+          <button>Subscribe this inbox</button>
+        </form>
+      </section>
+    `
   }
 
   // Sharing: LWS access is ODRL grants held by the storage (lws-access-requests),
@@ -309,12 +451,14 @@ export class LwsShell extends LitElement {
     }
 
     this.open(this.url)
+    this.startPolling()
   }
 
   disconnectedCallback () {
     super.disconnectedCallback()
     window.removeEventListener('hashchange', this.onHash)
     this.unsubscribeAuth?.()
+    this.stopPolling()
   }
 
   onHash = () => {
@@ -335,8 +479,9 @@ export class LwsShell extends LitElement {
   get docUrl () { return this.url.split('#')[0] }
 
   async open (url) {
-    if (this.view === 'search' || this.view === 'share') this.view = 'native'
+    if (['search', 'share', 'inbox'].includes(this.view)) this.view = 'native'
     this.url = url
+    this.changed = false
     this.error = null
     this.notice = null
     this.listing = null
@@ -476,7 +621,8 @@ export class LwsShell extends LitElement {
           <button>Open</button>
         </form>
         ${this.description ? html`<span title=${JSON.stringify(this.description).slice(0, 200)}>storage description ✓</span>` : nothing}
-        ${this.description ? html`<button id="search" aria-pressed=${this.view === 'search'} @click=${() => this.openSearch()}>Search</button>` : nothing}
+        ${this.description ? html`<button id="search" aria-pressed=${this.view === 'search'} @click=${() => this.openSearch()}>Search</button>
+          <button id="inbox" aria-pressed=${this.view === 'inbox'} @click=${() => this.openInbox()}>Inbox</button>` : nothing}
         <solid-ui-account></solid-ui-account>
       </header>
       <nav aria-label="Breadcrumb">
@@ -493,9 +639,12 @@ export class LwsShell extends LitElement {
       <main>
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.notice ? html`<p class="notice">${this.notice}</p>` : nothing}
+        ${this.changed ? html`<p class="notice" id="changed">This document changed on the server while you were editing. <button @click=${() => { this.editing = false; this.open(this.url) }}>Reload</button></p>` : nothing}
         ${this.view === 'search'
           ? this.renderSearch()
-          : this.view === 'share'
+          : this.view === 'inbox'
+            ? this.renderInbox()
+            : this.view === 'share'
             ? this.renderSharing()
             : this.view === 'pane'
             ? html`<div class="pane-host" data-pane=${this.paneName ?? ''}>${this.paneElement ?? 'Loading pane…'}</div>`

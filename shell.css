@@ -36,3 +36,8 @@ lws-shell .grants li, lws-shell .requests li { padding: .4rem 0; border-bottom: 
 lws-shell .policy { flex: 1 1 20rem; }
 lws-shell #new-grant { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 lws-shell #new-grant input[name=assignee] { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
+lws-shell .inbox h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
+lws-shell .notifications, lws-shell .subscriptions { list-style: none; padding: 0; margin: 0; }
+lws-shell .notifications li, lws-shell .subscriptions li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+lws-shell #subscribe { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
+lws-shell #subscribe input { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
