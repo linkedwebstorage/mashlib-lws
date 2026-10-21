@@ -154,6 +154,32 @@ try {
   await page.waitFor(() => document.querySelector('lws-shell').view !== 'search', { timeout: 10000 }).catch(() => {})
   check('opening a result leaves the search view', await page.evaluate(() => document.querySelector('lws-shell').view !== 'search'))
 
+  // Sharing: grants the storage holds for the resource; make one, see it, revoke it;
+  // a pending access request for the resource can be granted as asked.
+  await page.evaluate((u) => { location.hash = u }, `${STORAGE}notes/list.txt`)
+  await page.waitFor(() => !!document.querySelector('lws-shell #share'), { timeout: 15000 })
+  await page.evaluate(() => document.querySelector('lws-shell #share').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell #new-grant'), { timeout: 15000 })
+  const before = await page.evaluate(() => document.querySelectorAll('lws-shell .grants li').length)
+  await page.evaluate(() => { const f = document.querySelector('lws-shell #new-grant'); f.querySelector('[name=public]').checked = true; f.requestSubmit() })
+  const granted = await page.waitFor((n) => { const li = [...document.querySelectorAll('lws-shell .grants li')]; return li.length > n ? li.map(l => l.textContent.replace(/\s+/g, ' ').trim()) : false }, { timeout: 15000, args: [before] }).catch(() => [])
+  check(`a public read grant on list.txt appears: ${granted[granted.length - 1]?.slice(0, 60)}`, granted.some(t => /Public may read on notes\/list\.txt/.test(t)))
+  const grantsOnServer = await (await fetch(`${STORAGE}-/access/grants`, { headers: { accept: 'application/lws+json' } })).json()
+  check('the grant is held by the storage', grantsOnServer.totalItems > 0)
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell .grants li button.revoke')].pop().click())
+  await page.waitFor((n) => document.querySelectorAll('lws-shell .grants li').length === n, { timeout: 15000, args: [before] }).catch(() => {})
+  check('revoking removes it', await page.evaluate(() => document.querySelectorAll('lws-shell .grants li').length) === before)
+  const requested = await fetch(`${STORAGE}-/access/requests`, { method: 'POST', headers: { 'content-type': 'application/lws+json' }, body: JSON.stringify({ '@context': ['https://www.w3.org/ns/lws/v1'], type: ['AccessRequest'], access: [{ type: ['AccessPolicy'], action: ['read', 'modify'], assignee: 'did:key:z6MkSmokeTest', target: { type: 'StorageResource', value: [`${STORAGE}notes/list.txt`] } }] }) })
+  check(`an access request for list.txt can be filed (${requested.status})`, requested.status === 201)
+  await page.evaluate(() => document.querySelector('lws-shell #share').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell .requests li button.allow'), { timeout: 15000 }).catch(() => {})
+  check('the pending request is listed', await page.evaluate(() => document.querySelectorAll('lws-shell .requests li').length) > 0)
+  await page.evaluate(() => document.querySelector('lws-shell .requests li button.allow').click())
+  const fromRequest = await page.waitFor(() => { const li = [...document.querySelectorAll('lws-shell .grants li')]; return li.some(l => /did:key:z6MkSmokeTest/.test(l.textContent)) && !document.querySelector('lws-shell .requests li') }, { timeout: 15000 }).catch(() => false)
+  check('granting the request makes a grant for its agent and takes the request down', fromRequest === true)
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell .grants li')].filter(l => /did:key:z6MkSmokeTest/.test(l.textContent)).forEach(l => l.querySelector('button.revoke').click()))
+  await page.waitFor(() => ![...document.querySelectorAll('lws-shell .grants li')].some(l => /z6MkSmokeTest/.test(l.textContent)), { timeout: 15000 }).catch(() => {})
+
   // A JSON-LD resource written through the store is updated with a JSON merge patch
   // of just the changed keys, not a whole-document PUT.
   const jsonld = await page.evaluate(async (storage) => {

@@ -97,6 +97,7 @@ export class LwsShell extends LitElement {
     notice: { state: true },
     view: { state: true }, // 'native' | 'pane' | 'search'
     search: { state: true },
+    sharing: { state: true },
     paneName: { state: true },
     editing: { state: true },
   }
@@ -118,6 +119,115 @@ export class LwsShell extends LitElement {
     this.paneElement = null
     this.available = []
     this.search = null // { types, selected, results, text } while the search view is open
+    this.sharing = null // { grants, requests } for the current resource while the sharing view is open
+  }
+
+  // Sharing: LWS access is ODRL grants held by the storage (lws-access-requests),
+  // not an ACL beside the resource. The view shows the grants and pending requests
+  // that cover the current resource, makes a grant, and revokes one.
+  async openSharing () {
+    this.view = 'share'
+    this.error = null
+    this.sharing = { grants: [], requests: [] }
+
+    const services = LwsClient.services(this.description)
+
+    if (!services.AccessGrantService) {
+      this.error = 'This storage advertises no access grant service'
+
+      return
+    }
+
+    try {
+      const [grants, requests] = await Promise.all([
+        client.accessDocuments(services.AccessGrantService),
+        services.AccessRequestService ? client.accessDocuments(services.AccessRequestService).catch(() => []) : [],
+      ])
+
+      this.sharing = { grants: grants.filter(g => this.covers(g)), requests: requests.filter(r => this.covers(r)) }
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  // Does an access document (any of its policies) apply to the current resource?
+  // No target = the whole storage; a target value covers a resource by prefix.
+  covers (doc) {
+    return [].concat(doc.access ?? []).some(policy => {
+      const values = [].concat(policy.target?.value ?? [])
+
+      return !values.length || values.some(v => this.docUrl === v || (v.endsWith('/') && this.docUrl.startsWith(v)))
+    })
+  }
+
+  grant = async (e) => {
+    e.preventDefault()
+
+    const form = e.target
+    const isPublic = form.querySelector('[name=public]').checked
+    const assignee = isPublic ? 'http://xmlns.com/foaf/0.1/Agent' : form.querySelector('[name=assignee]').value.trim()
+    const action = [...form.querySelectorAll('[name=action]:checked')].map(c => c.value)
+
+    if (!assignee) { this.error = 'Who is the grant for? An agent URI, or public'; return }
+    if (!action.length) { this.error = 'Pick at least one action'; return }
+
+    const services = LwsClient.services(this.description)
+
+    try {
+      await client.createAccessDocument(services.AccessGrantService, {
+        type: ['AccessGrant'],
+        storage: this.storage,
+        access: [{ type: ['AccessPolicy'], action, assignee, target: { type: 'StorageResource', value: [this.docUrl] } }],
+      })
+      await this.openSharing()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async revoke (grant) {
+    try {
+      await client.remove(grant.id)
+      await this.openSharing()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  // Grant a pending request as it asks, then take the request down.
+  async grantRequest (request) {
+    const services = LwsClient.services(this.description)
+
+    try {
+      await client.createAccessDocument(services.AccessGrantService, { type: ['AccessGrant'], storage: this.storage, access: request.access, ...(request.inbox ? { inbox: request.inbox } : {}) })
+      await client.remove(request.id).catch(() => {})
+      await this.openSharing()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  renderSharing () {
+    const { grants, requests } = this.sharing ?? { grants: [], requests: [] }
+    const who = (assignee) => [].concat(assignee).map(a => a === 'http://xmlns.com/foaf/0.1/Agent' ? 'Public' : a).join(', ')
+    const policies = (doc) => [].concat(doc.access ?? []).map(p => html`<div class="policy"><b>${who(p.assignee)}</b> may ${[].concat(p.action).join(', ')}${p.target?.value ? html` on ${[].concat(p.target.value).map(v => v.replace(this.storage, '') || '/').join(', ')}` : ' (whole storage)'}</div>`)
+
+    return html`
+      <section class="sharing">
+        <p class="meta">Access to ${this.docUrl.replace(this.storage, '') || 'the storage'} is by grants the storage holds (ODRL access profile); there is no ACL beside it.</p>
+        <h3>Grants (${grants.length})</h3>
+        ${grants.length ? html`<ul class="grants">${grants.map(g => html`<li>${policies(g)}<span class="meta">${g.creator ? `by ${g.creator} ` : ''}${g.issued ? new Date(g.issued).toLocaleString() : ''}</span> <button class="revoke" @click=${() => this.revoke(g)}>Revoke</button></li>`)}</ul>` : html`<p class="meta">None covering this resource.</p>`}
+        ${requests.length ? html`<h3>Requests (${requests.length})</h3>
+          <ul class="requests">${requests.map(r => html`<li>${policies(r)}<span class="meta">${r.creator ?? ''}</span> <button class="allow" @click=${() => this.grantRequest(r)}>Grant</button></li>`)}</ul>` : nothing}
+        <h3>New grant</h3>
+        <form id="new-grant" @submit=${this.grant}>
+          <label><input type="checkbox" name="public"> Public (anyone)</label>
+          <input name="assignee" placeholder="agent URI (WebID or did:key)" aria-label="Assignee" size="40">
+          ${['read', 'modify', 'create', 'delete'].map(a => html`<label><input type="checkbox" name="action" value=${a} ?checked=${a === 'read'}> ${a}</label>`)}
+          <button>Grant</button>
+        </form>
+      </section>
+    `
   }
 
   // Search: the storage's type index (what classes it holds) and type search
@@ -225,7 +335,7 @@ export class LwsShell extends LitElement {
   get docUrl () { return this.url.split('#')[0] }
 
   async open (url) {
-    if (this.view === 'search') this.view = 'native'
+    if (this.view === 'search' || this.view === 'share') this.view = 'native'
     this.url = url
     this.error = null
     this.notice = null
@@ -261,7 +371,8 @@ export class LwsShell extends LitElement {
 
     await store.fetcher.load(this.docUrl, { force: !this.paneElement })
 
-    const labelled = (p) => { try { return !p.global && !!p.label(subject, paneContext) } catch { return false } }
+    // The WAC .acl editor means nothing on LWS; the Sharing view is its replacement.
+    const labelled = (p) => { try { return !p.global && p.name !== 'sharing' && !!p.label(subject, paneContext) } catch { return false } }
 
     this.available = registry.list.filter(labelled)
 
@@ -374,6 +485,7 @@ export class LwsShell extends LitElement {
         ${this.listing || this.resource ? html`
           <button aria-pressed=${this.view === 'native'} @click=${() => { this.view = 'native' }}>Native</button>
           <button aria-pressed=${this.view === 'pane'} @click=${() => { this.view = 'pane'; this.mountPane() }}>SolidOS pane</button>
+          ${this.description ? html`<button id="share" aria-pressed=${this.view === 'share'} @click=${() => this.openSharing()}>Sharing</button>` : nothing}
         ` : nothing}
         ${this.view === 'pane' && this.available.length > 1 ? this.available.map(p => html`
           <button class="pane-pick" aria-pressed=${p.name === this.paneName} @click=${() => this.mountPane(p.name)}>${p.name}</button>`) : nothing}
@@ -383,7 +495,9 @@ export class LwsShell extends LitElement {
         ${this.notice ? html`<p class="notice">${this.notice}</p>` : nothing}
         ${this.view === 'search'
           ? this.renderSearch()
-          : this.view === 'pane'
+          : this.view === 'share'
+            ? this.renderSharing()
+            : this.view === 'pane'
             ? html`<div class="pane-host" data-pane=${this.paneName ?? ''}>${this.paneElement ?? 'Loading pane…'}</div>`
             : html`${this.listing ? this.renderListing() : nothing}${this.resource ? this.renderResource() : nothing}`}
       </main>

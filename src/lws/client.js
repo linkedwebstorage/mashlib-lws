@@ -109,6 +109,36 @@ export class LwsClient {
     return (page.items ?? []).map(item => ({ url: new URL(item.id, endpoint).href, format: item.format, container: item.id.endsWith('/') }))
   }
 
+  /**
+   * Access grants or requests (lws-access-requests): the service endpoint is an LWS
+   * container of documents; each is fetched. Returns the documents (with absolute ids).
+   */
+  async accessDocuments (endpoint) {
+    const response = await this.fetch(endpoint, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    const page = await response.json()
+
+    return Promise.all((page.items ?? []).map(async item => {
+      const url = new URL(item.id, endpoint).href
+      const doc = await this.fetch(url, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+      if (!doc.ok) throw new LwsError(doc, url)
+
+      return { ...(await doc.json()), id: url }
+    }))
+  }
+
+  /** POST an AccessGrant or AccessRequest document to its service. Returns the stored document. */
+  async createAccessDocument (endpoint, doc) {
+    const response = await this.fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/lws+json' }, body: JSON.stringify({ '@context': ['https://www.w3.org/ns/lws/v1'], ...doc }) })
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    return response.json()
+  }
+
   /** GET a data resource: { body, contentType, etag }. */
   async get (url, accept) {
     const response = await this.fetch(url, accept ? { headers: { accept } } : {})

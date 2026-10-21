@@ -61,7 +61,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 | Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | ✅ native forms; panes' PUT-to-create and `createContainer` translated |
 | Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ all of solid-panes' registry; the pane is picked by `label(subject)`, generic ones (source, default, …) offered but not defaulted; `mintNew` for every creating pane |
 | Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; the client shares the store's authenticated transport; did:key / CID provider still to do |
-| Sharing | WAC `.acl` editor | ODRL access requests / grants | new pane |
+| Sharing | WAC `.acl` editor | ODRL access requests / grants held by the storage (`AccessGrantService` / `AccessRequestService`) | ✅ Sharing view: grants and pending requests covering the resource, new grant (agent URI or public; read/modify/create/delete), revoke, grant-a-request; the WAC sharing pane is not offered |
 | Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` (lws10-searchindex) | ✅ Search view: the storage's types as chips, type search (HTTP QUERY, `application/lws-query+json`; lwsd's GET form when the host's CORS preflight refuses QUERY) with a name filter. Every RDF write declares the classes in its body as `Link rel="type"`, so minted things are indexed |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | polling or a relay; open |
 | Inbox | LDP inbox | `NotificationService` (AS2) | new pane |

@@ -30,3 +30,9 @@ lws-shell .results { list-style: none; padding: 0; margin: .5rem 0; }
 lws-shell .results li { padding: .3rem 0; border-bottom: 1px solid #eef2f7; }
 lws-shell .results a { color: #083575; text-decoration: none; }
 lws-shell #search-text { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
+lws-shell .sharing h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
+lws-shell .grants, lws-shell .requests { list-style: none; padding: 0; margin: 0; }
+lws-shell .grants li, lws-shell .requests li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+lws-shell .policy { flex: 1 1 20rem; }
+lws-shell #new-grant { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+lws-shell #new-grant input[name=assignee] { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
