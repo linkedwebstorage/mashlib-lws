@@ -9,7 +9,9 @@
        e.g. https://jss.live/solidos-nobuild/ (GitHub Pages sends CORS headers). -->
   <script>
     (function () {
-      var base = new URL(location.href).searchParams.get('solidos') || './solidos-nobuild/'
+      // Local: the ./solidos-nobuild symlink (see README). Anywhere else: the published copy.
+      var local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)
+      var base = new URL(location.href).searchParams.get('solidos') || (local ? './solidos-nobuild/' : 'https://jss.live/solidos-nobuild/')
       var script = document.createElement('script')
       script.src = new URL('src/importmap.js', new URL(base, location.href)).href
       document.write(script.outerHTML) // synchronous, so the import map lands before any module

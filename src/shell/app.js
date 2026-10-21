@@ -7,13 +7,12 @@
 
 import { LitElement, html, nothing } from 'lit'
 import { sym } from 'rdflib'
-import { solidLogicSingleton, store } from 'solid-logic'
+import { authn, store } from 'solid-logic'
 import { utils } from 'solid-ui'
 import { LwsClient, LwsError } from '../lws/client.js'
 import { installLwsAdapter } from '../lws/adapter.js'
 import { installLwsWrites } from '../lws/writes.js'
-import folderPane from 'folder-pane'
-import { shortChatPane } from 'chat-pane'
+import * as solidPanes from 'solid-panes' // registers every SolidOS pane at import
 
 const DEFAULT_STORAGE = 'http://127.0.0.1:8737/lws/'
 const TEXT_TYPES = /^(text\/|application\/(json|ld\+json|xml|x-turtle|n-triples|sparql-update|javascript))/
@@ -47,22 +46,12 @@ installLwsAdapter(store, { client, isLwsContainer })
 installLwsWrites(store, { isLws })
 store.fetcher.__lwsRegisterStorage(storage)
 
-// The SolidOS panes mounted here, in preference order, and the context they expect
-// (as solidos-nobuild's pane.html builds it).
-const panes = [shortChatPane, folderPane]
-const byName = Object.fromEntries(panes.map(p => [p.name, p]))
+// Every SolidOS pane, from solid-panes' registry, with the context it builds
+// (store, registry, solid-logic). The outliner is replaced: panes that follow a
+// link call GotoSubject, which here means navigating the shell.
+const registry = { list: solidPanes.list, byName: solidPanes.byName, paneForIcon: solidPanes.paneForIcon, paneForPredicate: solidPanes.paneForPredicate, register: solidPanes.register }
 const paneContext = {
-  session: {
-    store,
-    paneRegistry: {
-      byName: (name) => byName[name] ?? { name: `missing:${name}`, label: () => null, render: (_s, c) => { const d = c.dom.createElement('div'); d.textContent = `Pane not mounted: ${name}`; return d } },
-      list: panes,
-      paneForIcon: {},
-      paneForPredicate: {},
-      register: () => {},
-    },
-    logic: solidLogicSingleton,
-  },
+  ...solidPanes.getOutliner(document).context,
   dom: document,
   getOutliner: (dom) => {
     const link = (obj) => { const a = dom.createElement('a'); a.href = `#${obj.uri}`; a.textContent = utils.label(obj); return a }
@@ -71,10 +60,14 @@ const paneContext = {
       VIEWAS_boring_default: null,
       propertyTR: (d) => { const tr = d.createElement('tr'); tr.appendChild(d.createElement('td')); return tr },
       outlineObjectTD: (obj) => { const td = dom.createElement('td'); td.appendChild(link(obj)); return td },
-      GotoSubject: (subject, _e, _p, _s, _r, table) => { const tr = dom.createElement('tr'); tr.appendChild(dom.createElement('td')).appendChild(link(subject)); table.appendChild(tr) },
+      GotoSubject: (subject) => { location.hash = subject.uri },
     }
   },
 }
+
+// Panes that label everything; shown, but never the default choice.
+const GENERIC = new Set(['default', 'internal', 'ui', 'sharing', 'source', 'n3', 'RDFXML', 'dataContents', 'humanReadable', 'tableOfClass', 'form', 'home'])
+const minting = () => registry.list.filter(p => typeof p.mintNew === 'function' && !p.global)
 
 export class LwsShell extends LitElement {
   static properties = {
@@ -169,12 +162,14 @@ export class LwsShell extends LitElement {
 
     await store.fetcher.load(this.docUrl, { force: !this.paneElement })
 
-    this.available = panes.filter(p => p.label(subject, paneContext))
+    const labelled = (p) => { try { return !p.global && !!p.label(subject, paneContext) } catch { return false } }
 
-    const pane = (name && byName[name]) ?? this.available[0] ?? folderPane
+    this.available = registry.list.filter(labelled)
+
+    const pane = (name && registry.byName(name)) ?? this.available.find(p => !GENERIC.has(p.name)) ?? this.available[0] ?? registry.byName('default')
 
     this.paneName = pane.name
-    this.paneElement = pane.render(subject, paneContext)
+    this.paneElement = pane.render(subject, paneContext, { solo: true }) // the outliner's options: the pane has the view to itself
     this.requestUpdate()
   }
 
@@ -227,15 +222,25 @@ export class LwsShell extends LitElement {
     }
   }
 
-  async newChat () {
-    const newBase = `${this.url}chat-${Date.now()}/`
+  // "New <thing>" with any pane that can mint one (chat, notepad, tracker, meeting, …).
+  async newThing (e) {
+    e.preventDefault()
+
+    const name = this.querySelector('#new-kind').value
+    const pane = registry.byName(name)
+    const slug = name.replace(/\W+/g, '-')
+    const newBase = `${this.url}${slug}-${Date.now()}/`
+
+    const me = authn.currentUser() ?? undefined // some panes record the author; a few need one
 
     try {
-      const options = await shortChatPane.mintNew(paneContext, { newBase, pane: shortChatPane, noun: 'chat', noIndexHTML: true, div: document.createElement('div'), dom: document })
+      const options = await pane.mintNew(paneContext, { newBase, pane, noun: name, noIndexHTML: true, div: document.createElement('div'), dom: document, me })
 
+      if (!options?.newInstance) throw new Error('the pane returned no new instance')
       location.hash = options.newInstance.uri
+      this.view = 'pane'
     } catch (error) {
-      this.error = `New chat: ${error.message}`
+      this.error = `New ${name}: ${error.message}${me ? '' : ' — this kind may need you to be logged in'}`
     }
   }
 
@@ -293,7 +298,10 @@ export class LwsShell extends LitElement {
       <div class="create">
         <form data-kind="container" @submit=${this.create}><input name="slug" placeholder="new folder" aria-label="New folder name"><button>New folder</button></form>
         <form data-kind="resource" @submit=${this.create}><input name="slug" placeholder="new file.txt" aria-label="New file name"><button>New file</button></form>
-        <button id="new-chat" @click=${this.newChat}>New chat</button>
+        <form id="new-thing" @submit=${this.newThing}>
+          <select id="new-kind" aria-label="Kind of thing to create">${minting().map(p => html`<option value=${p.name}>${p.name}</option>`)}</select>
+          <button id="new-chat">New</button>
+        </form>
       </div>
     `
   }

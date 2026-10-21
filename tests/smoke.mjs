@@ -96,8 +96,8 @@ try {
   // A SolidOS pane creates a resource: chat mintNew PUTs index.ttl into a container
   // that does not exist yet → POSTs, creating the container first.
   await goto(`${STORAGE}notes/`)
-  await page.waitFor(() => !!document.querySelector('lws-shell #new-chat'), { timeout: 15000 })
-  await click('#new-chat')
+  await page.waitFor(() => !!document.querySelector('lws-shell #new-kind'), { timeout: 15000 })
+  await page.evaluate(() => { document.querySelector('lws-shell #new-kind').value = 'chat'; document.querySelector('lws-shell #new-thing').requestSubmit() })
   const chatUrl = await page.waitFor(() => /index\.ttl#this$/.test(location.hash) && location.hash.slice(1), { timeout: 30000 })
   const chatDoc = await get(chatUrl.split('#')[0])
   check(`pane mintNew: chat created through PUT→POST at ${chatUrl.replace(STORAGE, '')}`, !!chatDoc && /meeting#Chat|Chat/.test(chatDoc))
@@ -120,6 +120,26 @@ try {
   }, chatUrl)
   const chatDoc2 = await get(chatUrl.split('#')[0])
   check(`pane edit: updater.update → read-modify-PUT (editable=${updated.editable}, ${updated.before}→${updated.after} triples)`, /Renamed by the test/.test(chatDoc2 ?? '') && !/"Chat"/.test(chatDoc2 ?? ''))
+
+  // --- every pane (registry) -----------------------------------------------
+  const registry = await page.evaluate(async () => { const p = await import('solid-panes'); return { count: p.list.length, minting: p.list.filter(x => x.mintNew && !x.global).map(x => x.name) } })
+  check(`solid-panes registry mounted: ${registry.count} panes, ${registry.minting.length} can create (${registry.minting.join(', ')})`, registry.count >= 20 && registry.minting.includes('pad'))
+
+  // A profile in LWS storage: card.ttl#me is a foaf:Person, so the profile pane labels it.
+  await goto(`${STORAGE}card.ttl#me`)
+  const profile = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'profile' && /Alice LWS/.test(h.textContent) && h.dataset.pane }, { timeout: 30000 })
+  check('profile pane mounts on card.ttl#me and shows "Alice LWS"', profile === 'profile')
+  const choices = await page.evaluate(() => [...document.querySelectorAll('lws-shell nav .pane-pick')].map(b => b.textContent))
+  check(`other panes offered for the subject: ${choices.join(', ')}`, choices.includes('profile') && choices.length > 1)
+
+  // Mint a long chat through the New menu (a notepad needs a user: tests/login.mjs), then its pane mounts.
+  await goto(`${STORAGE}notes/`)
+  await page.waitFor(() => !!document.querySelector('lws-shell nav button'), { timeout: 15000 })
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell nav button')].find(b => b.textContent === 'Native').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell #new-kind'), { timeout: 15000 })
+  await page.evaluate(() => { document.querySelector('lws-shell #new-kind').value = 'long chat'; document.querySelector('lws-shell #new-thing').requestSubmit() })
+  const longChat = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'long chat' && h.querySelector('table, div, textarea') && location.hash.slice(1) }, { timeout: 30000 })
+  check(`long chat minted from the New menu and its pane mounted: ${longChat.replace(STORAGE, '')}`, /long-chat-\d+\/index\.ttl#this$/.test(longChat))
 
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))

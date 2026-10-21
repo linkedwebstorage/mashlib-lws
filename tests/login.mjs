@@ -74,8 +74,8 @@ try {
 
   // The chat pane, with a user: create a chat, send a message, see it stored.
   await page.evaluate((h) => { location.hash = h }, `${STORAGE}${folder}/`)
-  await page.waitFor(() => !!document.querySelector('lws-shell #new-chat'), { timeout: 15000 })
-  await page.evaluate(() => document.querySelector('lws-shell #new-chat').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell #new-kind'), { timeout: 15000 })
+  await page.evaluate(() => { document.querySelector('lws-shell #new-kind').value = 'chat'; document.querySelector('lws-shell #new-thing').requestSubmit() })
   const chatUrl = await page.waitFor(() => /index\.ttl#this$/.test(location.hash) && location.hash.slice(1), { timeout: 30000 })
   await page.waitFor(() => !!document.querySelector('lws-shell .pane-host textarea'), { timeout: 30000 })
   check('chat pane shows a message box (user known)', true)
@@ -93,6 +93,15 @@ try {
   await page.goto(`${SHELL}?storage=${encodeURIComponent(STORAGE)}#${chatUrl}`)
   await page.waitFor((m) => document.querySelector('lws-shell .pane-host')?.textContent.includes(m), { timeout: 30000, args: [message] })
   check('after reload the chat shows the message', true)
+
+  // A notepad needs an author: with the user known it mints and its pane mounts.
+  await page.evaluate((h) => { location.hash = h }, `${STORAGE}${folder}/`)
+  await page.waitFor(() => !!document.querySelector('lws-shell nav button'), { timeout: 15000 })
+  await page.evaluate(() => [...document.querySelectorAll('lws-shell nav button')].find(b => b.textContent === 'Native').click())
+  await page.waitFor(() => !!document.querySelector('lws-shell #new-kind'), { timeout: 15000 })
+  await page.evaluate(() => { document.querySelector('lws-shell #new-kind').value = 'pad'; document.querySelector('lws-shell #new-thing').requestSubmit() })
+  const pad = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'pad' && location.hash.slice(1) }, { timeout: 30000 })
+  check(`logged in: notepad minted (author = me) and its pane mounted: ${pad.replace(STORAGE, '')}`, /pad-\d+\/index\.ttl#this$/.test(pad))
 
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))
