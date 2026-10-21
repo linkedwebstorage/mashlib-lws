@@ -57,7 +57,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 | View data resources | GET | GET | ✅ native |
 | Edit (native) | PUT | conditional PUT; 412 on a stale ETag | ✅ |
 | Storage description | `pim:storage` | `lws#storage` link → `/-/description` (CID document) | ✅ discovered |
-| Edit from panes (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); no RDF PATCH | ✅ `writes.js`: ETags, read-modify-PUT; merge-patch for JSON resources still to do |
+| Edit from panes (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); no RDF PATCH | ✅ `writes.js`: ETags, read-modify-PUT for Turtle; a JSON merge patch (RFC 7396) of just the changed keys for JSON-LD documents in the shape it writes (flat single-subject), whole-document PUT otherwise |
 | Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | ✅ native forms; panes' PUT-to-create and `createContainer` translated |
 | Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ all of solid-panes' registry; the pane is picked by `label(subject)`, generic ones (source, default, …) offered but not defaulted; `mintNew` for every creating pane |
 | Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; the client shares the store's authenticated transport; did:key / CID provider still to do |

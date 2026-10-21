@@ -141,6 +141,35 @@ try {
   const longChat = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'long chat' && h.querySelector('table, div, textarea') && location.hash.slice(1) }, { timeout: 30000 })
   check(`long chat minted from the New menu and its pane mounted: ${longChat.replace(STORAGE, '')}`, /long-chat-\d+\/index\.ttl#this$/.test(longChat))
 
+  // A JSON-LD resource written through the store is updated with a JSON merge patch
+  // of just the changed keys, not a whole-document PUT.
+  const jsonld = await page.evaluate(async (storage) => {
+    const { store } = await import('solid-logic')
+    const { sym, lit, st } = await import('rdflib')
+    const url = `${storage}notes/thing-${Date.now()}.jsonld`
+    const me = sym(`${url}#it`)
+    const DC = (n) => sym(`http://purl.org/dc/elements/1.1/${n}`)
+
+    await store.updater.update([], [st(me, DC('title'), lit('first'), sym(url)), st(me, DC('creator'), lit('smoke'), sym(url))])
+    const written = await (await fetch(url)).json()
+    const seen = []
+    const realFetch = window.fetch
+
+    window.fetch = (input, init = {}) => { seen.push({ url: String(input?.url ?? input), method: (init.method ?? input?.method ?? 'GET').toUpperCase(), type: new Headers(init.headers ?? {}).get('content-type'), body: init.body }); return realFetch(input, init) }
+    try {
+      await store.updater.update([st(me, DC('title'), lit('first'), sym(url))], [st(me, DC('title'), lit('patched'), sym(url))])
+    } finally { window.fetch = realFetch }
+    const after = await (await fetch(url)).json()
+    const patch = seen.find(r => r.method === 'PATCH' && r.url === url)
+
+    return { written, after, patch, puts: seen.filter(r => r.method === 'PUT' && r.url === url).length }
+  }, STORAGE)
+  check(`JSON-LD written flat: ${JSON.stringify(jsonld.written).slice(0, 80)}`, jsonld.written['@id'] && !jsonld.written['@graph'])
+  const value = (doc, name) => doc?.[`http://purl.org/dc/elements/1.1/${name}`]?.[0]?.['@value']
+  const patchBody = JSON.parse(jsonld.patch?.body ?? '{}')
+  check(`update sent a merge patch of one key: ${jsonld.patch?.body}`, jsonld.patch?.type === 'application/merge-patch+json' && value(patchBody, 'title') === 'patched' && Object.keys(patchBody).length === 1 && jsonld.puts === 0)
+  check('the patched document keeps the other property', value(jsonld.after, 'title') === 'patched' && value(jsonld.after, 'creator') === 'smoke')
+
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))
   await page.screenshot(new URL('../.shots/shell.png', import.meta.url).pathname)

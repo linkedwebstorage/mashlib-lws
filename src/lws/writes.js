@@ -10,7 +10,9 @@
 // So this wraps the fetcher's transport: ETags are remembered from every response
 // and sent back as If-Match; a PUT that 404s becomes a POST into its container
 // (creating missing containers first); an LDP container type is rewritten. And it
-// replaces update() for LWS documents with read-modify-PUT of the whole document.
+// replaces update() for LWS documents with read-modify-PUT of the whole document —
+// except a JSON-LD document in the shape this module writes, which gets a JSON
+// merge patch (RFC 7396) of just the changed keys.
 
 import { graph, serialize, sym } from 'rdflib'
 import { toJsonLd } from 'solidos-nobuild/src/lib/write-fallback.js'
@@ -80,7 +82,7 @@ export function installLwsWrites (store, { isLws }) {
       if (/ldp#(Basic)?Container/.test(link)) headers.set('link', `<${LWS}Container>; rel="type"`)
     }
 
-    if (method === 'PUT' && !headers.has('if-match') && etags.has(target)) headers.set('if-match', etags.get(target))
+    if (['PUT', 'PATCH'].includes(method) && !headers.has('if-match') && etags.has(target)) headers.set('if-match', etags.get(target))
 
     let response = await transport(target, { ...options, headers })
 
@@ -154,8 +156,9 @@ export function installLwsWrites (store, { isLws }) {
       next.add(ins.map(s => s.why?.equals?.(doc) ? s : { ...s, why: doc, graph: doc }))
 
       const jsonld = /\.json(ld)?$/.test(doc.value)
-      const body = jsonld ? toJsonLd(next.statements) : await turtle(next, doc)
-      const response = await fetcher.webOperation('PUT', doc.value, { data: body, contentType: jsonld ? 'application/ld+json' : 'text/turtle' })
+      const response = jsonld
+        ? await mergePatchOrPut(doc.value, store.statementsMatching(null, null, null, doc), next.statements)
+        : await fetcher.webOperation('PUT', doc.value, { data: await turtle(next, doc), contentType: 'text/turtle' })
 
       store.remove(dels)
       store.add(ins)
@@ -167,6 +170,56 @@ export function installLwsWrites (store, { isLws }) {
     if (typeof callback !== 'function') return promise
 
     promise.catch(() => {})
+  }
+
+  // A JSON-LD document: a merge patch of the changed keys when the stored document is
+  // exactly what this module would write for the triples the store has (so keys mean
+  // what we think); otherwise the whole document, PUT. Single-subject documents are
+  // written flat ({ @context, @id, … }), so a patch touches only the changed properties.
+  async function mergePatchOrPut (url, current, nextStatements) {
+    const after = flatten(JSON.parse(toJsonLd(nextStatements)))
+    const put = () => fetcher.webOperation('PUT', url, { data: JSON.stringify(after, null, 2), contentType: 'application/ld+json' })
+    const stored = await transport(url, { method: 'GET', headers: { accept: 'application/ld+json, application/json' } })
+
+    if (!stored.ok) return put()
+
+    let storedDoc
+
+    try { storedDoc = await stored.json() } catch { return put() }
+
+    const before = flatten(JSON.parse(toJsonLd(current)))
+
+    if (!sameJson(before, storedDoc) || '@graph' in after || '@graph' in before) return put()
+
+    const patch = {}
+
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+      if (!(key in after)) patch[key] = null
+      else if (!sameJson(before[key], after[key])) patch[key] = after[key]
+    }
+
+    if (!Object.keys(patch).length) return stored
+
+    const response = await fetcher.webOperation('PATCH', url, { data: JSON.stringify(patch), contentType: 'application/merge-patch+json' })
+
+    if (!response.ok) return put()
+
+    return response
+  }
+
+  function flatten (doc) {
+    return doc['@graph']?.length === 1 ? { '@context': doc['@context'], ...doc['@graph'][0] } : doc
+  }
+
+  function sameJson (a, b) {
+    return JSON.stringify(sortKeys(a)) === JSON.stringify(sortKeys(b))
+  }
+
+  function sortKeys (v) {
+    if (Array.isArray(v)) return v.map(sortKeys)
+    if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])]))
+
+    return v
   }
 
   function sameTriple (a, b) {
