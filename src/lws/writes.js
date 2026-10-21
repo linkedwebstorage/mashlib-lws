@@ -178,6 +178,8 @@ export function installLwsWrites (store, { isLws }) {
     return isLws(target) ? 'LWS' : originalEditable(uri, kb)
   }
 
+  const updating = new Map() // document url → the update in flight
+
   // Read-modify-PUT: the document's triples after the diff, serialised whole.
   updater.update = function (deletions, insertions, callback, secondTry, options) {
     const dels = [].concat(deletions ?? [])
@@ -203,7 +205,13 @@ export function installLwsWrites (store, { isLws }) {
       cb(doc.value, true, '', response)
     }
 
-    const promise = run().catch(error => { cb(doc.value, false, String(error?.message ?? error)); throw error })
+    // One update at a time per document: panes fire several at once (a schedule's
+    // details.ttl), and each read-modify-PUT must see the ETag the previous one made.
+    const previous = updating.get(doc.value) ?? Promise.resolve()
+    const promise = previous.catch(() => {}).then(run).catch(error => { cb(doc.value, false, String(error?.message ?? error)); throw error })
+
+    updating.set(doc.value, promise)
+    promise.catch(() => {}).finally(() => { if (updating.get(doc.value) === promise) updating.delete(doc.value) })
 
     if (typeof callback !== 'function') return promise
 
