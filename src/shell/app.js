@@ -291,7 +291,11 @@ export class LwsShell extends LitElement {
     if (!services.NotificationService) { this.error = 'This storage advertises no notification service'; return }
 
     try {
-      if (!this.inbox?.exists) await client.create(parentOf(this.inboxUrl), { slug: nameOf(this.inboxUrl), container: true }).catch(error => { if (error.status !== 409) throw error })
+      // Make the inbox container if it is not there — checked now, not from the
+      // view's cached state, so a quick click never makes a second one.
+      const head = await client.fetch(this.inboxUrl, { method: 'HEAD', headers: { accept: 'application/lws+json' } })
+
+      if (head.status === 404) await client.create(parentOf(this.inboxUrl), { slug: nameOf(this.inboxUrl), container: true }).catch(error => { if (error.status !== 409) throw error })
       await client.subscribe(services.NotificationService, { topic: [topic], inbox: this.inboxUrl })
       await this.openInbox()
     } catch (error) {
