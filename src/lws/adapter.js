@@ -22,6 +22,10 @@ export function containerTriples (listing) {
     st(doc, sym(RDF_TYPE), sym(`${LDP}Container`), doc),
     st(doc, sym(RDF_TYPE), sym(`${LDP}BasicContainer`), doc),
     st(doc, sym(RDF_TYPE), sym(`${LWS}Container`), doc),
+    // The ACL link rdflib would record from a Solid server's Link header; writes.js
+    // accepts (and ignores) writes to it, as LWS has no WAC. Panes that set an ACL on
+    // what they create (contacts) need it.
+    st(doc, sym('http://www.iana.org/assignments/link-relations/acl'), sym(`${listing.url}.acl`), doc),
   ]
 
   for (const item of listing.items) {

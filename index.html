@@ -25,33 +25,8 @@
     body { margin: 0; background: #fff; color: #101828; font-family: 'Atkinson Hyperlegible Next', system-ui, sans-serif; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
-    /* The shell renders into light DOM (so mounted panes get their stylesheets); its CSS lives here. */
-    lws-shell { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
-    lws-shell > header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1.25rem; background: #1d293d; color: #fff; }
-    lws-shell > header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
-    lws-shell > header form { display: flex; gap: .5rem; flex: 1; }
-    lws-shell > header solid-ui-account { margin-left: auto; }
-    lws-shell > header input { flex: 1; min-width: 0; padding: .35rem .6rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
-    lws-shell > nav { display: flex; align-items: center; gap: .5rem; padding: .5rem 1.25rem; border-bottom: 1px solid #e2e8f0; font-size: .9rem; flex-wrap: wrap; }
-    lws-shell > nav a { color: #083575; text-decoration: none; }
-    lws-shell > nav .spacer { flex: 1; }
-    lws-shell button { font: inherit; padding: .25rem .6rem; border: 1px solid #90a1b9; background: #fff; border-radius: 5px; cursor: pointer; }
-    lws-shell button[aria-pressed="true"] { background: #7c4dff; color: #fff; border-color: #7c4dff; }
-    lws-shell > main { padding: 1.25rem; }
-    lws-shell table { border-collapse: collapse; width: 100%; max-width: 60rem; }
-    lws-shell th, lws-shell td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e2e8f0; font-size: .95rem; }
-    lws-shell th { color: #4a5565; font-weight: 500; }
-    lws-shell td a { color: #083575; text-decoration: none; }
-    lws-shell td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    lws-shell pre, lws-shell textarea { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 1rem; overflow: auto; max-width: 60rem; width: 100%; box-sizing: border-box; font: .9rem/1.4 ui-monospace, monospace; }
-    lws-shell .meta { color: #6a7282; font-size: .85rem; margin: 0 0 .75rem; }
-    lws-shell .error { color: #b00020; }
-    lws-shell .notice { color: #0a5027; }
-    lws-shell .create { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
-    lws-shell .create form { display: flex; gap: .4rem; }
-    lws-shell .create input { padding: .25rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
-    lws-shell .pane-host { max-width: 60rem; }
   </style>
+  <link rel="stylesheet" href="shell.css">
   <script type="module">
     // The solid-ui web components (provider, account, login modal, dialogs), then the shell.
     await import('solidos-nobuild/src/index.js')

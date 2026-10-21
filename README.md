@@ -19,9 +19,22 @@ python3 -m http.server 8738
 
 Open http://localhost:8738/?storage=http://127.0.0.1:8737/lws/. The import map, theme and panes come from `solidos-nobuild`: on localhost from the symlink, elsewhere from https://jss.live/solidos-nobuild/ (`?solidos=<base>` overrides either).
 
+Hosted copy: https://linkedwebstorage.github.io/mashlib-lws/?storage=https://your.server/lws/ (the server needs CORS; a server on your own machine is out of reach of a public page in Chrome unless it answers the private-network preflight).
+
+### Served by the storage itself
+
+`lwsd --browser <url of boot.js>` makes the server answer browser navigations to containers and non-HTML resources with this shell, as JSS does with `--mashlib-module` for a Solid pod. Then `https://server/lws/notes/` *is* the app: real URLs, no `#`, and the storage known from the server.
+
+```sh
+ln -s $PWD lws-data/apps-mashlib-lws   # inside the server's root; or any https host
+npx lwsd --port 8737 --host 127.0.0.1 --root ./lws-data --no-auth \
+    --browser http://127.0.0.1:8737/lws/apps-mashlib-lws/boot.js
+```
+
 ```sh
 node tests/smoke.mjs      # browse, edit, create, panes — against the anonymous server above
-node tests/login.mjs      # login + authenticated writes — against lwsd with auth on (see the file's header)
+node tests/login.mjs      # login + authenticated writes + every kind the New menu can make — lwsd with auth on (see the file's header)
+node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see the file's header)
 ```
 
 ## Layout
@@ -33,6 +46,8 @@ node tests/login.mjs      # login + authenticated writes — against lwsd with a
 | `src/lws/writes.js` | Wraps the fetcher's transport and the updater: ETags remembered and sent as `If-Match`; a PUT that 404s becomes POST + `Slug` into its container (missing containers created); `ldp:BasicContainer` → `lws#Container`; `updater.update` on an LWS document is read-modify-PUT of the whole document (no RDF PATCH in LWS) |
 | `src/shell/app.js` | The shell (`<lws-shell>`, Lit): storage, breadcrumb, native listing and resource view, and a slot that mounts a SolidOS pane for the current subject |
 | `index.html` | Loads `solidos-nobuild`'s import map and theme, then the shell |
+| `boot.js` | The same, as one module for a server to serve on its own pages (`lwsd --browser`); the page's URL is the subject |
+| `shell.css` | The shell's stylesheet, shared by both |
 
 ## Roadmap: parity with mashlib, on LWS
 
@@ -50,7 +65,8 @@ node tests/login.mjs      # login + authenticated writes — against lwsd with a
 | Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` | new search pane |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | polling or a relay; open |
 | Inbox | LDP inbox | `NotificationService` (AS2) | new pane |
-| Served by the pod | JSS `--mashlib-module` | lwsd serving this page for `/lws/` navigations | `boot.js` |
+| Served by the pod | JSS `--mashlib-module` | lwsd `--browser` serving this page for `/lws/` navigations | ✅ `boot.js`; real URLs as the address |
+| Access control from panes | `.acl` beside new things, `Link rel="acl"` | ODRL grants; no WAC | shimmed: `.acl`/`.meta` writes succeed quietly, reads 404, and documents carry an ACL link, so panes that insist (contacts, schedule, pad) create fine |
 
 ## Licence
 

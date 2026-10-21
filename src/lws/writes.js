@@ -67,6 +67,13 @@ export function installLwsWrites (store, { isLws }) {
     const method = (options.method ?? 'GET').toUpperCase()
     const headers = new Headers(options.headers ?? {})
 
+    // Web Access Control documents don't exist in LWS (access is by ODRL grants):
+    // panes that write .acl/.meta beside what they create get a quiet success,
+    // and reading one is a clean 404 rather than a stray data resource.
+    if (/\.(acl|meta)$/.test(target)) {
+      return new Response(null, ['PUT', 'PATCH', 'DELETE', 'POST'].includes(method) ? { status: 204 } : { status: 404, statusText: 'Not Found' })
+    }
+
     if (method === 'POST') {
       const link = headers.get('link') ?? ''
 
@@ -87,7 +94,11 @@ export function installLwsWrites (store, { isLws }) {
       }
     }
 
-    if (method === 'PUT' && response.status === 404) {
+    if (method === 'PUT' && response.status === 404 && target.endsWith('/')) {
+      // PUT of a container URL (folder pane's mintNew): create the container itself.
+      await ensureContainer(target)
+      response = new Response(null, { status: 201, headers: { location: target } })
+    } else if (method === 'PUT' && response.status === 404) {
       // Creation: POST into the container, which may itself need creating.
       const parent = parentOf(target)
 
@@ -100,6 +111,16 @@ export function installLwsWrites (store, { isLws }) {
 
     if (response.headers?.get?.('etag')) etags.set(target, response.headers.get('etag'))
     if (method === 'DELETE' && response.ok) etags.delete(target)
+
+    // Panes that insist on an ACL beside what they make (contacts, schedule, pad) look
+    // for Link rel="acl" on the document; rdflib records it as a triple. Give them one
+    // pointing at <doc>.acl, which the no-op above accepts, so creation goes through.
+    if (['GET', 'HEAD'].includes(method) && response.ok && !target.endsWith('/') && !response.headers.get('link')?.includes('rel="acl"')) {
+      const headers = new Headers(response.headers)
+
+      headers.append('link', `<${target}.acl>; rel="acl"`)
+      response = new Response(response.status === 204 ? null : response.body, { status: response.status, statusText: response.statusText, headers })
+    }
 
     return response
   }

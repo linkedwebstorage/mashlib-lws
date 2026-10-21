@@ -18,7 +18,24 @@ import * as solidPanes from 'solid-panes' // registers every SolidOS pane at imp
 const DEFAULT_STORAGE = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'http://127.0.0.1:8737/lws/' : ''
 const TEXT_TYPES = /^(text\/|application\/(json|ld\+json|xml|x-turtle|n-triples|sparql-update|javascript))/
 
+// Served by the storage itself (boot.js): the server says which storage, and the
+// page's own URL is the subject.
+const POD = window.LWS_POD?.storage ?? null
+
+// The subject: #<url> on the app page; on the pod the page's own URL, where a plain
+// fragment (card.ttl#me) is part of the subject.
+function subjectFromLocation () {
+  const hash = location.hash.slice(1)
+
+  if (/^https?:/.test(hash)) return hash
+  if (POD) return location.href
+
+  return storage
+}
+
 function currentStorage () {
+  if (POD) return POD
+
   const param = new URL(location.href).searchParams.get('storage')
 
   if (param) { try { localStorage.setItem('lws-storage', param) } catch {} return param }
@@ -88,7 +105,7 @@ export class LwsShell extends LitElement {
   constructor () {
     super()
     this.storage = storage
-    this.url = location.hash.slice(1) || storage
+    this.url = subjectFromLocation()
     this.listing = null
     this.resource = null
     this.description = null
@@ -125,7 +142,20 @@ export class LwsShell extends LitElement {
     this.unsubscribeAuth?.()
   }
 
-  onHash = () => { this.open(location.hash.slice(1) || storage) }
+  onHash = () => {
+    const url = location.hash.slice(1)
+
+    // On the pod, a plain resource URL can be the page's URL (the server serves this
+    // page for it again on reload); subjects with a fragment keep the #<url> form.
+    if (POD && url && isLws(url) && !url.includes('#')) {
+      history.replaceState(null, '', url)
+      this.open(url)
+
+      return
+    }
+
+    this.open(subjectFromLocation())
+  }
 
   get docUrl () { return this.url.split('#')[0] }
 
@@ -229,10 +259,19 @@ export class LwsShell extends LitElement {
   async newThing (e) {
     e.preventDefault()
 
+    this.error = null
+    this.notice = null
+
     const name = this.querySelector('#new-kind').value
     const pane = registry.byName(name)
     const slug = name.replace(/\W+/g, '-')
-    const newBase = `${this.url}${slug}-${Date.now()}/`
+    // A text file (source pane) is named by the user, with an extension; everything
+    // else gets its own container.
+    const fileName = name === 'source' ? window.prompt('Name of the new file (with an extension, e.g. notes.txt)', `${slug}-${Date.now()}.txt`) : null
+
+    if (name === 'source' && !fileName) return
+
+    const newBase = fileName ? `${this.url}${fileName}` : `${this.url}${slug}-${Date.now()}/`
 
     const me = authn.currentUser() ?? undefined // some panes record the author; a few need one
 

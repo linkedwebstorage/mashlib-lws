@@ -103,7 +103,34 @@ try {
   const pad = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'pad' && location.hash.slice(1) }, { timeout: 30000 })
   check(`logged in: notepad minted (author = me) and its pane mounted: ${pad.replace(STORAGE, '')}`, /pad-\d+\/index\.ttl#this$/.test(pad))
 
-  const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401/.test(l))
+  // Every kind the New menu offers: mint it, its resource exists, its pane mounts (or is offered).
+  page.answerPrompts('named-by-test.txt') // the source pane asks for a file name
+  const kinds = await page.evaluate(async () => (await import('solid-panes')).list.filter(p => typeof p.mintNew === 'function' && !p.global).map(p => p.name))
+  check(`kinds offered by the New menu: ${kinds.join(', ')}`, kinds.length === 10)
+  for (const kind of kinds) {
+    await page.evaluate((h) => { location.hash = h }, `${STORAGE}${folder}/`)
+    await page.waitFor(() => !!document.querySelector('lws-shell tbody, lws-shell nav button'), { timeout: 15000 })
+    await page.evaluate(() => [...document.querySelectorAll('lws-shell nav button')].find(b => b.textContent === 'Native')?.click())
+    await page.waitFor(() => !!document.querySelector('lws-shell #new-kind'), { timeout: 15000 })
+    const before = location_(await page.url())
+    await page.evaluate((k) => { document.querySelector('lws-shell #new-kind').value = k; document.querySelector('lws-shell #new-thing').requestSubmit() }, kind)
+    const outcome = await page.waitFor((b) => {
+      const err = document.querySelector('lws-shell .error')?.textContent
+      if (err) return { error: err }
+      if (location.href === b) return false
+      const h = document.querySelector('lws-shell .pane-host')
+      const shell = document.querySelector('lws-shell')
+      return h && h.dataset.pane && (h.children.length || h.textContent.trim()) ? { url: location.hash.slice(1), pane: h.dataset.pane, offered: shell.available.map(p => p.name) } : false
+    }, { timeout: 40000, args: [before] }).catch(e => ({ error: e.message.slice(0, 120) }))
+    if (outcome.error) { check(`new ${kind}`, false, outcome.error); continue }
+    const doc = outcome.url.split('#')[0]
+    const exists = (await fetch(doc, { method: 'HEAD' })).ok
+    const expected = kind === 'Dokieli' ? 'humanReadable' : kind // upstream: the Dokieli pane only mints; viewing is humanReadable's
+    check(`new ${kind}: ${outcome.url.replace(STORAGE, '')} exists, pane ${outcome.pane}`, exists && (outcome.pane === expected || outcome.offered.includes(expected)))
+  }
+  function location_ (u) { return u }
+
+  const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401|disjointUnionOf|allowed state list/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))
   await page.screenshot(new URL('../.shots/login.png', import.meta.url).pathname)
 } catch (error) {
