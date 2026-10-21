@@ -35,6 +35,8 @@ npx lwsd --port 8737 --host 127.0.0.1 --root ./lws-data --no-auth \
 node tests/smoke.mjs      # browse, edit, create, panes — against the anonymous server above
 node tests/login.mjs      # login + authenticated writes + every kind the New menu can make — lwsd with auth on (see the file's header)
 node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see the file's header)
+node tests/didkey.mjs     # a did:key made in the browser authenticates writes — lwsd with auth on
+node tests/run-all.mjs    # all four, one after another
 ```
 
 ## Layout
@@ -43,6 +45,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 |---|---|
 | `src/lws/client.js` | LWS 1.0 client: containers (`application/lws+json`), resources, POST-to-create, conditional PUT, storage description and its services, type index and type search, access grants/requests, webhook subscriptions. Takes any `fetch` |
 | `src/lws/adapter.js` | Wraps the shared rdflib store's `fetcher.load`: an LWS container listing becomes `ldp:contains` (and `lws:`) triples, so SolidOS panes read it as a folder |
+| `src/lws/didkey.js` | A did:key identity: Ed25519 via WebCrypto, `did:key:z6Mk…`, self-issued EdDSA JWT (sub = iss = client_id), kept in localStorage |
 | `src/lws/writes.js` | Wraps the fetcher's transport and the updater: `Link rel="type"` for the classes in every RDF body written (the type index learns from headers); ETags remembered and sent as `If-Match`; a PUT that 404s becomes POST + `Slug` into its container (missing containers created); `ldp:BasicContainer` → `lws#Container`; `updater.update` on an LWS document is read-modify-PUT of the whole document (no RDF PATCH in LWS) |
 | `src/shell/app.js` | The shell (`<lws-shell>`, Lit): storage, breadcrumb, native listing and resource view, and a slot that mounts a SolidOS pane for the current subject |
 | `index.html` | Loads `solidos-nobuild`'s import map and theme, then the shell |
@@ -60,7 +63,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 | Edit from panes (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); no RDF PATCH | ✅ `writes.js`: ETags, read-modify-PUT for Turtle; a JSON merge patch (RFC 7396) of just the changed keys for JSON-LD documents in the shape it writes (flat single-subject), whole-document PUT otherwise |
 | Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | ✅ native forms; panes' PUT-to-create and `createContainer` translated |
 | Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ all of solid-panes' registry; the pane is picked by `label(subject)`, generic ones (source, default, …) offered but not defaulted; `mintNew` for every creating pane |
-| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; the client shares the store's authenticated transport; did:key / CID provider still to do |
+| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; and **Use a did:key**: an Ed25519 key made in the browser (WebCrypto, kept in localStorage), presented as a self-issued JWT Bearer on LWS requests when no OpenID session is active; panes get the did as the current user. CID (a did:web-style controlled identifier document) still to do |
 | Sharing | WAC `.acl` editor | ODRL access requests / grants held by the storage (`AccessGrantService` / `AccessRequestService`) | ✅ Sharing view: grants and pending requests covering the resource, new grant (agent URI or public; read/modify/create/delete), revoke, grant-a-request; the WAC sharing pane is not offered |
 | Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` (lws10-searchindex) | ✅ Search view: the storage's types as chips, type search (HTTP QUERY, `application/lws-query+json`; lwsd's GET form when the host's CORS preflight refuses QUERY) with a name filter. Every RDF write declares the classes in its body as `Link rel="type"`, so minted things are indexed |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | ✅ the shell polls the current document's ETag (HEAD every 5 s while visible) and reloads the view on a change; during an edit it announces the change with a Reload button instead |

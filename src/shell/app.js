@@ -12,6 +12,7 @@ import { utils } from 'solid-ui'
 import { LwsClient, LwsError } from '../lws/client.js'
 import { installLwsAdapter } from '../lws/adapter.js'
 import { installLwsWrites } from '../lws/writes.js'
+import { DidKeyIdentity } from '../lws/didkey.js'
 import * as solidPanes from 'solid-panes' // registers every SolidOS pane at import
 
 // The dev server is the default only on localhost; elsewhere ask for a storage.
@@ -103,6 +104,7 @@ export class LwsShell extends LitElement {
     sharing: { state: true },
     inbox: { state: true },
     changed: { state: true },
+    identity: { state: true },
     paneName: { state: true },
     editing: { state: true },
   }
@@ -127,6 +129,47 @@ export class LwsShell extends LitElement {
     this.sharing = null // { grants, requests } for the current resource while the sharing view is open
     this.inbox = null // { url, items, subscriptions } while the inbox view is open
     this.changed = false // the current document changed on the server while shown
+    this.identity = DidKeyIdentity.load() // a did:key held here, used when no provider session is active
+    this.useIdentity()
+  }
+
+  // did:key identity (lws10-authn-ssi-did-key): the key is the account. While one is
+  // active and no OpenID session is, LWS requests carry its self-issued token and
+  // panes get it as the current user.
+  useIdentity () {
+    store.fetcher.__lwsCredential = this.identity ? (audience) => this.identity.token(audience) : null
+  }
+
+  async createIdentity () {
+    try {
+      this.identity = await DidKeyIdentity.create()
+      this.useIdentity()
+      this.notice = `Using ${this.identity.did} — kept in this browser; there is no recovery if it is cleared`
+      if (this.view === 'pane') { this.paneElement = null; this.mountPane(this.paneName) }
+    } catch (error) {
+      this.error = `Could not create a key: ${error.message}`
+    }
+  }
+
+  forgetIdentity () {
+    DidKeyIdentity.forget()
+    this.identity = null
+    this.useIdentity()
+    this.notice = null
+    if (this.view === 'pane') { this.paneElement = null; this.mountPane(this.paneName) }
+  }
+
+  // The agent panes act as: the provider session's WebID, else the did:key.
+  get me () {
+    return authn.currentUser() ?? (this.identity ? sym(this.identity.did) : undefined)
+  }
+
+  renderIdentity () {
+    if (authn.currentUser()) return nothing
+
+    return this.identity
+      ? html`<span class="identity" title=${this.identity.did}>${this.identity.did.slice(0, 16)}…${this.identity.did.slice(-4)} <button id="forget-key" @click=${() => this.forgetIdentity()}>Forget key</button></span>`
+      : html`<button id="use-key" title="Make an Ed25519 key in this browser and act as its did:key" @click=${() => this.createIdentity()}>Use a did:key</button>`
   }
 
   // Live updates. LWS notifies by webhook, which a page cannot receive, so the shell
@@ -595,7 +638,7 @@ export class LwsShell extends LitElement {
 
     const newBase = fileName ? `${this.url}${fileName}` : `${this.url}${slug}-${Date.now()}/`
 
-    const me = authn.currentUser() ?? undefined // some panes record the author; a few need one
+    const me = this.me // some panes record the author; a few need one
 
     try {
       const options = await pane.mintNew(paneContext, { newBase, pane, noun: name, noIndexHTML: true, div: document.createElement('div'), dom: document, me })
@@ -623,6 +666,7 @@ export class LwsShell extends LitElement {
         ${this.description ? html`<span title=${JSON.stringify(this.description).slice(0, 200)}>storage description ✓</span>` : nothing}
         ${this.description ? html`<button id="search" aria-pressed=${this.view === 'search'} @click=${() => this.openSearch()}>Search</button>
           <button id="inbox" aria-pressed=${this.view === 'inbox'} @click=${() => this.openInbox()}>Inbox</button>` : nothing}
+        ${this.renderIdentity()}
         <solid-ui-account></solid-ui-account>
       </header>
       <nav aria-label="Breadcrumb">

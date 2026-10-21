@@ -41,3 +41,4 @@ lws-shell .notifications, lws-shell .subscriptions { list-style: none; padding: 
 lws-shell .notifications li, lws-shell .subscriptions li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 lws-shell #subscribe { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
 lws-shell #subscribe input { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
+lws-shell .identity { font-size: .85rem; font-family: ui-monospace, monospace; display: inline-flex; gap: .4rem; align-items: center; }

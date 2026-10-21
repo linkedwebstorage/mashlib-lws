@@ -35,10 +35,23 @@ export function installLwsWrites (store, { isLws }) {
   const parentOf = (url) => new URL('.', url.endsWith('/') ? url.slice(0, -1) : url).href
   const nameOf = (url) => decodeURIComponent((url.endsWith('/') ? url.slice(0, -1) : url).split('/').pop())
 
+  // The transport with the shell's credential (if any) on requests that carry none.
+  async function send (url, options = {}) {
+    const headers = new Headers(options.headers ?? {})
+
+    if (fetcher.__lwsCredential && !headers.has('authorization')) {
+      const token = await fetcher.__lwsCredential(storageRootOf(url) ?? url)
+
+      if (token) headers.set('authorization', `Bearer ${token}`)
+    }
+
+    return transport(url, { ...options, headers })
+  }
+
   async function ensureContainer (url) {
     if (!isLws(url) || url === storageRootOf(url)) return
 
-    const head = await transport(url, { method: 'HEAD' })
+    const head = await send(url, { method: 'HEAD' })
 
     if (head.ok) return
 
@@ -46,7 +59,7 @@ export function installLwsWrites (store, { isLws }) {
 
     await ensureContainer(parent)
 
-    const created = await transport(parent, { method: 'POST', headers: { slug: nameOf(url), link: `<${LWS}Container>; rel="type"` } })
+    const created = await send(parent, { method: 'POST', headers: { slug: nameOf(url), link: `<${LWS}Container>; rel="type"` } })
 
     if (!created.ok && created.status !== 409) throw new Error(`could not create container ${url}: ${created.status}`)
   }
@@ -62,6 +75,10 @@ export function installLwsWrites (store, { isLws }) {
 
   fetcher.__lwsRegisterStorage = (root) => roots.set(root, true)
 
+  // A credential for LWS requests that carry none (a did:key identity held by the
+  // shell): async (storageRoot) => bearer token or null.
+  fetcher.__lwsCredential = null
+
   fetcher._fetch = async function (url, options = {}) {
     const target = String(url?.value ?? url)
 
@@ -69,6 +86,7 @@ export function installLwsWrites (store, { isLws }) {
 
     const method = (options.method ?? 'GET').toUpperCase()
     const headers = new Headers(options.headers ?? {})
+
 
     // Web Access Control documents don't exist in LWS (access is by ODRL grants):
     // panes that write .acl/.meta beside what they create get a quiet success,
@@ -93,15 +111,15 @@ export function installLwsWrites (store, { isLws }) {
 
     if (['PUT', 'PATCH'].includes(method) && !headers.has('if-match') && etags.has(target)) headers.set('if-match', etags.get(target))
 
-    let response = await transport(target, { ...options, headers })
+    let response = await send(target, { ...options, headers })
 
     if (method === 'PUT' && response.status === 428) {
       // Unknown to us: fetch the current ETag and try once more.
-      const head = await transport(target, { method: 'HEAD' })
+      const head = await send(target, { method: 'HEAD' })
 
       if (head.ok && head.headers.get('etag')) {
         headers.set('if-match', head.headers.get('etag'))
-        response = await transport(target, { ...options, headers })
+        response = await send(target, { ...options, headers })
       }
     }
 
@@ -117,7 +135,7 @@ export function installLwsWrites (store, { isLws }) {
       headers.delete('if-match')
       headers.set('slug', nameOf(target))
       headers.set('link', `<${LWS}DataResource>; rel="type"`)
-      response = await transport(parent, { ...options, method: 'POST', headers })
+      response = await send(parent, { ...options, method: 'POST', headers })
     }
 
     if (response.headers?.get?.('etag')) etags.set(target, response.headers.get('etag'))
@@ -188,7 +206,7 @@ export function installLwsWrites (store, { isLws }) {
   async function mergePatchOrPut (url, current, nextStatements) {
     const after = flatten(JSON.parse(toJsonLd(nextStatements)))
     const put = () => fetcher.webOperation('PUT', url, { data: JSON.stringify(after, null, 2), contentType: 'application/ld+json' })
-    const stored = await transport(url, { method: 'GET', headers: { accept: 'application/ld+json, application/json' } })
+    const stored = await send(url, { method: 'GET', headers: { accept: 'application/ld+json, application/json' } })
 
     if (!stored.ok) return put()
 
