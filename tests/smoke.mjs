@@ -185,11 +185,37 @@ try {
   await page.evaluate(() => document.querySelector('lws-shell #share').click())
   await page.waitFor(() => !!document.querySelector('lws-shell .requests li button.allow'), { timeout: 15000 }).catch(() => {})
   check('the pending request is listed', await page.evaluate(() => document.querySelectorAll('lws-shell .requests li').length) > 0)
+  const accessLine = await page.waitFor(() => { const p = document.querySelector('lws-shell #my-access'); return p && !/checking/.test(p.textContent) ? p.textContent.replace(/\s+/g, ' ').trim() : false }, { timeout: 15000 }).catch(() => '')
+  check(`sharing says what I can do: "${accessLine}"`, /As anonymous you can read and can write here/.test(accessLine))
   await page.evaluate(() => document.querySelector('lws-shell .requests li button.allow').click())
   const fromRequest = await page.waitFor(() => { const li = [...document.querySelectorAll('lws-shell .grants li')]; return li.some(l => /did:key:z6MkSmokeTest/.test(l.textContent)) && !document.querySelector('lws-shell .requests li') }, { timeout: 15000 }).catch(() => false)
   check('granting the request makes a grant for its agent and takes the request down', fromRequest === true)
   await page.evaluate(() => [...document.querySelectorAll('lws-shell .grants li')].filter(l => /did:key:z6MkSmokeTest/.test(l.textContent)).forEach(l => l.querySelector('button.revoke').click()))
   await page.waitFor(() => ![...document.querySelectorAll('lws-shell .grants li')].some(l => /z6MkSmokeTest/.test(l.textContent)), { timeout: 15000 }).catch(() => {})
+
+  // Listing actions: rename a file, move it into a container, delete it.
+  await page.evaluate((u) => { location.hash = u }, `${STORAGE}notes/`)
+  await page.waitFor(() => !!document.querySelector('lws-shell tbody tr'), { timeout: 15000 })
+  const victim = `victim-${Date.now()}.txt`
+  await fetch(`${STORAGE}notes/`, { method: 'POST', headers: { slug: victim, 'content-type': 'text/plain' }, body: 'move me' })
+  await page.evaluate((u) => { location.hash = u }, `${STORAGE}notes/`)
+  await page.evaluate(() => document.querySelector('lws-shell').open(document.querySelector('lws-shell').url))
+  await page.waitFor((v) => [...document.querySelectorAll('lws-shell tbody a')].some(a => a.textContent === v), { timeout: 15000, args: [victim] })
+  const renamed = victim.replace('victim', 'renamed')
+  page.answerPrompts(renamed)
+  await page.evaluate((v) => [...document.querySelectorAll('lws-shell tbody tr')].find(tr => tr.querySelector('a').textContent === v).querySelector('button.rename').click(), victim)
+  const afterRename = await page.waitFor((r) => [...document.querySelectorAll('lws-shell tbody a')].some(a => a.textContent === r) ? [...document.querySelectorAll('lws-shell tbody a')].map(a => a.textContent) : false, { timeout: 15000, args: [renamed] }).catch(() => [])
+  check(`rename: ${victim} → ${renamed} (old gone)`, afterRename.includes(renamed) && !afterRename.includes(victim) && (await fetch(`${STORAGE}notes/${renamed}`)).ok)
+  page.answerPrompts(`${STORAGE}notes/proj/`)
+  await page.evaluate((r) => [...document.querySelectorAll('lws-shell tbody tr')].find(tr => tr.querySelector('a').textContent === r).querySelector('button.move').click(), renamed)
+  const moved = await page.waitFor((r) => ![...document.querySelectorAll('lws-shell tbody a')].some(a => a.textContent === r), { timeout: 15000, args: [renamed] }).catch(() => false)
+  check(`move: ${renamed} into notes/proj/ via the linkset's up link`, moved === true && (await fetch(`${STORAGE}notes/proj/${renamed}`)).ok && [301, 404].includes((await fetch(`${STORAGE}notes/${renamed}`, { redirect: 'manual' })).status)) // lwsd leaves a 301 at the old name
+  await page.evaluate((u) => { location.hash = u }, `${STORAGE}notes/proj/`)
+  await page.waitFor((r) => [...document.querySelectorAll('lws-shell tbody a')].some(a => a.textContent === r), { timeout: 15000, args: [renamed] })
+  await page.evaluate((r) => [...document.querySelectorAll('lws-shell tbody tr')].find(tr => tr.querySelector('a').textContent === r).querySelector('button.delete').click(), renamed) // confirm() is accepted by the driver
+  const deleted = await page.waitFor((r) => ![...document.querySelectorAll('lws-shell tbody a')].some(a => a.textContent === r), { timeout: 15000, args: [renamed] }).catch(() => false)
+  check('delete from the listing', deleted === true && (await fetch(`${STORAGE}notes/proj/${renamed}`)).status === 404)
+  check('the notice banner can be dismissed', await page.evaluate(() => { const b = document.querySelector('lws-shell .banner .dismiss-banner'); if (!b) return false; b.click(); return true }) && await page.waitFor(() => !document.querySelector('lws-shell .notice.banner'), { timeout: 3000 }).then(() => true).catch(() => false))
 
   // Live updates: the shell polls the current document's ETag and reloads on a change
   // made elsewhere; during an edit it only says so.
@@ -232,6 +258,8 @@ try {
     delivered = await page.waitFor(() => [...document.querySelectorAll('lws-shell .notifications li')].some(l => /Update/.test(l.textContent) && /notes\/list\.txt/.test(l.textContent)), { timeout: 3000 }).catch(() => false)
   }
   check('the change is delivered to the inbox and shown as an Update notification', delivered === true)
+  const badge = await page.waitFor(() => document.querySelector('lws-shell #inbox .badge')?.textContent, { timeout: 15000 }).catch(() => null)
+  check(`the header's Inbox badge shows the count (${badge})`, Number(badge) >= 1)
   await page.evaluate(() => [...document.querySelectorAll('lws-shell .notifications li button.dismiss')].forEach(b => b.click()))
   await page.evaluate(() => [...document.querySelectorAll('lws-shell .subscriptions li button.unsubscribe')].forEach(b => b.click()))
   await page.waitFor(() => !document.querySelector('lws-shell .subscriptions li'), { timeout: 15000 }).catch(() => {})

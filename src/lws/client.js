@@ -182,6 +182,64 @@ export class LwsClient {
     return response.json()
   }
 
+  /** The resource's linkset document (rel="linkset" on a HEAD), or null. */
+  async linksetOf (url) {
+    const head = await this.fetch(url, { method: 'HEAD' })
+
+    if (!head.ok) throw new LwsError(head, url)
+
+    return parseLinks(head.headers.get('link')).find(l => l.rel === 'linkset')?.href ?? null
+  }
+
+  /**
+   * Move a resource or container into another container of the same storage
+   * (lws10-core 9.6): a JSON Patch on its linkset replacing the `up` link. The name
+   * is kept; the new URL is returned.
+   */
+  async move (url, destinationContainer) {
+    const linkset = await this.linksetOf(url)
+
+    if (!linkset) throw new Error(`${url} has no linkset to patch`)
+
+    const response = await this.fetch(new URL(linkset, url).href, { method: 'PATCH', headers: { 'content-type': 'application/json-patch+json' }, body: JSON.stringify([{ op: 'replace', path: '/linkset/0/up/0/href', value: destinationContainer }]) })
+
+    if (!response.ok) throw new LwsError(response, url)
+
+    const doc = await response.json().catch(() => null)
+
+    return doc?.linkset?.[0]?.anchor ?? new URL((url.endsWith('/') ? url.slice(0, -1) : url).split('/').pop() + (url.endsWith('/') ? '/' : ''), destinationContainer).href
+  }
+
+  /** Rename a data resource: the bytes re-created under the new name, then the old removed. */
+  async rename (url, newName) {
+    const response = await this.fetch(url)
+
+    if (!response.ok) throw new LwsError(response, url)
+
+    const container = new URL('.', url).href
+    const created = await this.create(container, { slug: newName, body: await response.arrayBuffer(), contentType: response.headers.get('content-type')?.split(';')[0] || 'application/octet-stream' })
+
+    await this.remove(url)
+
+    return created
+  }
+
+  /**
+   * What the current credential may do with `url`, without changing it: a HEAD for
+   * read; for write, a PUT guarded by an If-Match that cannot match — 412 means the
+   * server would have let it through, 401/403 means not. { read, write } as booleans,
+   * plus the statuses.
+   */
+  async access (url) {
+    const head = await this.fetch(url, { method: 'HEAD', headers: url.endsWith('/') ? { accept: 'application/lws+json' } : {} })
+    // lwsd authorises before it looks at the method or the precondition: a container
+    // answers 405 (PUT never applies to one), a resource 412 (the If-Match cannot
+    // match); either means the write would have been allowed. 401/403 mean not.
+    const probe = await this.fetch(url, { method: 'PUT', headers: { 'if-match': '"lws-access-probe"', 'content-type': 'application/octet-stream' }, body: '' })
+
+    return { read: head.ok, readStatus: head.status, write: [405, 412].includes(probe.status), writeStatus: probe.status }
+  }
+
   /** GET a data resource: { body, contentType, etag }. */
   async get (url, accept) {
     const response = await this.fetch(url, accept ? { headers: { accept } } : {})

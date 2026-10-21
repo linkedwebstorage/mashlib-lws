@@ -71,3 +71,15 @@ lws-shell .notifications, lws-shell .subscriptions { list-style: none; padding: 
 lws-shell .notifications li, lws-shell .subscriptions li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 lws-shell #subscribe { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
 lws-shell .identity { font-size: .85rem; font-family: ui-monospace, monospace; display: inline-flex; gap: .4rem; align-items: center; }
+/* Banners: error and notice, dismissible, on solid-ui's colours */
+lws-shell .banner { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 5px; margin: 0 0 10px; font-size: var(--solid-ui-font-size-sm, .875rem); }
+lws-shell .error.banner { background: color-mix(in srgb, var(--solid-ui-color-error, #b00020) 8%, white); border: 1px solid color-mix(in srgb, var(--solid-ui-color-error, #b00020) 40%, white); }
+lws-shell .notice.banner { background: color-mix(in srgb, #0a5027 8%, white); border: 1px solid color-mix(in srgb, #0a5027 35%, white); }
+lws-shell .banner .dismiss-banner { margin-left: auto; min-height: 0; padding: 0 8px; border: 0; background: transparent; font-size: 1.1rem; line-height: 1; color: inherit; }
+lws-shell .banner .dismiss-banner:hover { background: transparent; color: inherit; }
+lws-shell td.actions { text-align: right; white-space: nowrap; }
+lws-shell td.actions button { min-height: 0; padding: 2px 8px; font-size: var(--solid-ui-font-size-xs, .75rem); opacity: 0; }
+lws-shell tbody tr:hover td.actions button, lws-shell td.actions button:focus { opacity: 1; }
+lws-shell .badge { display: inline-block; min-width: 1.4em; padding: 0 .4em; border-radius: 999px; background: var(--solid-ui-color-primary, #7c4dff); color: #fff; font-size: var(--solid-ui-font-size-xs, .75rem); text-align: center; }
+lws-shell > header button[aria-pressed="true"] .badge { background: #fff; color: var(--solid-ui-color-primary, #7c4dff); }
+lws-shell .access { margin: 0 0 .75rem; }

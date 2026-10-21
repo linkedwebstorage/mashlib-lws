@@ -106,6 +106,7 @@ export class LwsShell extends LitElement {
     inbox: { state: true },
     changed: { state: true },
     identity: { state: true },
+    inboxCount: { state: true },
     paneName: { state: true },
     editing: { state: true },
   }
@@ -130,6 +131,8 @@ export class LwsShell extends LitElement {
     this.sharing = null // { grants, requests } for the current resource while the sharing view is open
     this.inbox = null // { url, items, subscriptions } while the inbox view is open
     this.changed = false // the current document changed on the server while shown
+    this.inboxCount = 0
+    this.inboxEtag = null
     this.identity = DidKeyIdentity.load() // a did:key held here, used when no provider session is active
     this.useIdentity()
   }
@@ -222,6 +225,8 @@ export class LwsShell extends LitElement {
       const etag = head.headers.get('etag')
       const known = this.listing?.etag ?? this.resource?.etag ?? store.fetcher.__lwsEtags?.get(url)
 
+      this.countInbox()
+
       if (!head.ok || !etag || !known || etag === known || url !== this.docUrl) return
       if (this.editing) { this.changed = true; return }
 
@@ -239,6 +244,24 @@ export class LwsShell extends LitElement {
       // next tick
     } finally {
       this.polling = false
+    }
+  }
+
+  // The unread count for the header badge: items in the inbox container, polled with
+  // the document; a missing inbox is zero.
+  async countInbox () {
+    if (!this.storage) return
+
+    try {
+      const head = await client.fetch(this.inboxUrl, { method: 'HEAD', headers: { accept: 'application/lws+json' } })
+
+      if (!head.ok) { this.inboxCount = 0; return }
+      if (head.headers.get('etag') === this.inboxEtag) return
+
+      this.inboxEtag = head.headers.get('etag')
+      this.inboxCount = (await client.container(this.inboxUrl)).items.filter(i => !i.container).length
+    } catch {
+      // next tick
     }
   }
 
@@ -278,6 +301,8 @@ export class LwsShell extends LitElement {
       const services = LwsClient.services(this.description)
       const subscriptions = services.NotificationService ? await client.subscriptions(services.NotificationService).catch(() => []) : []
 
+      this.inboxEtag = null
+      this.countInbox()
       this.inbox = { url: this.inbox.url, exists: !!listing, items: docs.filter(Boolean).sort((a, b) => String(b.activity?.published ?? b.modified ?? '').localeCompare(String(a.activity?.published ?? a.modified ?? ''))), subscriptions }
     } catch (error) {
       this.error = error.message
@@ -358,7 +383,8 @@ export class LwsShell extends LitElement {
         services.AccessRequestService ? client.accessDocuments(services.AccessRequestService).catch(() => []) : [],
       ])
 
-      this.sharing = { grants: grants.filter(g => this.covers(g)), requests: requests.filter(r => this.covers(r)) }
+      this.sharing = { grants: grants.filter(g => this.covers(g)), requests: requests.filter(r => this.covers(r)), access: null }
+      client.access(this.docUrl).then(access => { if (this.view === 'share') this.sharing = { ...this.sharing, access } }).catch(() => {})
     } catch (error) {
       this.error = error.message
     }
@@ -422,13 +448,15 @@ export class LwsShell extends LitElement {
   }
 
   renderSharing () {
-    const { grants, requests } = this.sharing ?? { grants: [], requests: [] }
+    const { grants, requests, access } = this.sharing ?? { grants: [], requests: [], access: null }
+    const whoAmI = authn.currentUser()?.uri ?? this.identity?.agent ?? 'anonymous'
     const who = (assignee) => [].concat(assignee).map(a => a === 'http://xmlns.com/foaf/0.1/Agent' ? 'Public' : a).join(', ')
     const policies = (doc) => [].concat(doc.access ?? []).map(p => html`<div class="policy"><b>${who(p.assignee)}</b> may ${[].concat(p.action).join(', ')}${p.target?.value ? html` on ${[].concat(p.target.value).map(v => v.replace(this.storage, '') || '/').join(', ')}` : ' (whole storage)'}</div>`)
 
     return html`
       <section class="sharing">
         <p class="meta">Access to ${this.docUrl.replace(this.storage, '') || 'the storage'} is by grants the storage holds (ODRL access profile); there is no ACL beside it.</p>
+        <p class="access" id="my-access">As <b>${whoAmI === 'anonymous' ? 'anonymous' : whoAmI.replace(this.storage, '')}</b> you ${access ? html`<b>${access.read ? 'can' : 'cannot'}</b> read${access.read ? '' : ` (${access.readStatus})`} and <b>${access.write ? 'can' : 'cannot'}</b> write${access.write ? '' : ` (${access.writeStatus})`} here.` : html`<span class="meta">… checking</span>`}</p>
         <h3>Grants (${grants.length})</h3>
         ${grants.length ? html`<ul class="grants">${grants.map(g => html`<li>${policies(g)}<span class="meta">${g.creator ? `by ${g.creator} ` : ''}${g.issued ? new Date(g.issued).toLocaleString() : ''}</span> <button class="revoke" @click=${() => this.revoke(g)}>Revoke</button></li>`)}</ul>` : html`<p class="meta">None covering this resource.</p>`}
         ${requests.length ? html`<h3>Requests (${requests.length})</h3>
@@ -524,6 +552,7 @@ export class LwsShell extends LitElement {
 
     this.open(this.url)
     this.startPolling()
+    this.countInbox()
   }
 
   disconnectedCallback () {
@@ -650,6 +679,53 @@ export class LwsShell extends LitElement {
   }
 
   // "New <thing>" with any pane that can mint one (chat, notepad, tracker, meeting, …).
+  // Per-item actions on the listing. Delete and move are what LWS offers (DELETE,
+  // and a linkset patch of the up link); rename is copy-then-delete, files only.
+  async deleteItem (item) {
+    const name = decodeURIComponent(item.url.slice(this.url.length))
+
+    if (!window.confirm(item.container ? `Delete the container ${name} and everything in it?` : `Delete ${name}?`)) return
+
+    try {
+      await client.remove(item.url, { recursive: item.container })
+      this.notice = `Deleted ${name}`
+      this.listing = await client.container(this.url)
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async renameItem (item) {
+    const name = decodeURIComponent(item.url.slice(this.url.length))
+    const newName = window.prompt('New name', name)?.trim()
+
+    if (!newName || newName === name) return
+
+    try {
+      await client.rename(item.url, newName)
+      this.notice = `Renamed ${name} to ${newName}`
+      this.listing = await client.container(this.url)
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async moveItem (item) {
+    const name = decodeURIComponent(item.url.slice(this.url.length))
+    const dest = window.prompt('Move into which container? (URL in this storage)', parentOf(this.url) === this.url ? this.url : parentOf(this.url))?.trim()
+
+    if (!dest) return
+
+    try {
+      const moved = await client.move(item.url, dest.endsWith('/') ? dest : `${dest}/`)
+
+      this.notice = html`Moved ${name} to <a href="#${moved}">${moved.replace(this.storage, '')}</a>`
+      this.listing = await client.container(this.url)
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
   async newThing (e) {
     e.preventDefault()
 
@@ -694,7 +770,7 @@ export class LwsShell extends LitElement {
         </form>
         ${this.description ? html`<span title=${JSON.stringify(this.description).slice(0, 200)}>storage description ✓</span>` : nothing}
         ${this.description ? html`<button id="search" aria-pressed=${this.view === 'search'} @click=${() => this.openSearch()}>Search</button>
-          <button id="inbox" aria-pressed=${this.view === 'inbox'} @click=${() => this.openInbox()}>Inbox</button>` : nothing}
+          <button id="inbox" aria-pressed=${this.view === 'inbox'} @click=${() => this.openInbox()}>Inbox${this.inboxCount ? html` <span class="badge">${this.inboxCount}</span>` : nothing}</button>` : nothing}
         ${this.renderIdentity()}
         <solid-ui-account></solid-ui-account>
       </header>
@@ -710,8 +786,8 @@ export class LwsShell extends LitElement {
           <button class="pane-pick" aria-pressed=${p.name === this.paneName} @click=${() => this.mountPane(p.name)}>${p.name}</button>`) : nothing}
       </nav>
       <main>
-        ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
-        ${this.notice ? html`<p class="notice">${this.notice}</p>` : nothing}
+        ${this.error ? html`<p class="error banner" role="alert">${this.error} <button class="dismiss-banner" aria-label="Dismiss" @click=${() => { this.error = null }}>×</button></p>` : nothing}
+        ${this.notice ? html`<p class="notice banner" role="status">${this.notice} <button class="dismiss-banner" aria-label="Dismiss" @click=${() => { this.notice = null }}>×</button></p>` : nothing}
         ${this.changed ? html`<p class="notice" id="changed">This document changed on the server while you were editing. <button @click=${() => { this.editing = false; this.open(this.url) }}>Reload</button></p>` : nothing}
         ${this.view === 'search'
           ? this.renderSearch()
@@ -741,13 +817,18 @@ export class LwsShell extends LitElement {
         <icon-lucide-globe title=${`ETag ${etag}`}></icon-lucide-globe>
       </div>
       <table>
-        <thead><tr><th>Name</th><th>Type</th><th class="num">Size</th><th>Modified</th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th class="num">Size</th><th>Modified</th><th></th></tr></thead>
         <tbody>
           ${items.map(item => html`<tr>
             <td><a href="#${item.url}">${item.container ? html`<icon-lucide-folder></icon-lucide-folder>` : nothing}${decodeURIComponent(item.url.slice(this.url.length))}</a></td>
             <td class="type">${item.container ? 'Container' : item.format ?? 'DataResource'}</td>
             <td class="num">${item.size ?? ''}</td>
             <td class="when">${item.modified ? new Date(item.modified).toLocaleString() : ''}</td>
+            <td class="actions">
+              ${item.container ? nothing : html`<button class="rename" title="Rename" @click=${() => this.renameItem(item)}>Rename</button>`}
+              <button class="move" title="Move to another container" @click=${() => this.moveItem(item)}>Move</button>
+              <button class="delete" title="Delete" @click=${() => this.deleteItem(item)}>Delete</button>
+            </td>
           </tr>`)}
         </tbody>
       </table>
