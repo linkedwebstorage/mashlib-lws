@@ -14,7 +14,8 @@ import { installLwsAdapter } from '../lws/adapter.js'
 import { installLwsWrites } from '../lws/writes.js'
 import * as solidPanes from 'solid-panes' // registers every SolidOS pane at import
 
-const DEFAULT_STORAGE = 'http://127.0.0.1:8737/lws/'
+// The dev server is the default only on localhost; elsewhere ask for a storage.
+const DEFAULT_STORAGE = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) ? 'http://127.0.0.1:8737/lws/' : ''
 const TEXT_TYPES = /^(text\/|application\/(json|ld\+json|xml|x-turtle|n-triples|sparql-update|javascript))/
 
 function currentStorage () {
@@ -26,7 +27,7 @@ function currentStorage () {
 }
 
 const storage = currentStorage()
-const isLws = (url) => url.startsWith(storage)
+const isLws = (url) => !!storage && url.startsWith(storage)
 const isLwsContainer = (url) => isLws(url) && url.endsWith('/')
 
 // The client shares the store's transport: solid-logic's authenticated fetch once
@@ -44,7 +45,7 @@ try {
 
 installLwsAdapter(store, { client, isLwsContainer })
 installLwsWrites(store, { isLws })
-store.fetcher.__lwsRegisterStorage(storage)
+if (storage) store.fetcher.__lwsRegisterStorage(storage)
 
 // Every SolidOS pane, from solid-panes' registry, with the context it builds
 // (store, registry, solid-logic). The outliner is replaced: panes that follow a
@@ -103,7 +104,7 @@ export class LwsShell extends LitElement {
   async connectedCallback () {
     super.connectedCallback()
     window.addEventListener('hashchange', this.onHash)
-    client.description(storage).then(d => { this.description = d }).catch(() => {})
+    if (storage) client.description(storage).then(d => { this.description = d }).catch(() => {})
 
     // Let the session restore first (the <solid-ui-provider> around us runs
     // authn.checkUser), so panes render with the user known; then follow logins
@@ -140,7 +141,9 @@ export class LwsShell extends LitElement {
     this.available = []
 
     try {
-      if (isLwsContainer(url)) {
+      if (!url) {
+        this.notice = 'Enter the URL of an LWS storage above, e.g. https://example.org/lws/ — or run one locally: npx lwsd --no-auth'
+      } else if (isLwsContainer(url)) {
         this.listing = await client.container(url)
       } else if (url.includes('#')) {
         this.view = 'pane' // a subject inside a document: only a pane can show it
@@ -324,6 +327,8 @@ export class LwsShell extends LitElement {
   }
 
   crumbs () {
+    if (!storage) return []
+
     const out = [{ url: storage, label: new URL(storage).host + new URL(storage).pathname }]
 
     if (!this.url.startsWith(storage)) return out
