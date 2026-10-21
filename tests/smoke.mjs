@@ -266,6 +266,33 @@ try {
   check('unsubscribed', await page.evaluate(() => !document.querySelector('lws-shell .subscriptions li')))
   await putElsewhere('milk\neggs\nchanged elsewhere')
 
+  // The WAC bridge: what a pane writes as <doc>.acl becomes grants, and reading
+  // <doc>.acl shows the grants — so panes' own access boxes are real on LWS.
+  const wac = await page.evaluate(async (listTxt) => {
+    const { store } = await import('solid-logic')
+    const { acl } = await import('solid-ui')
+    const { sym } = await import('rdflib')
+    const aclDoc = `${listTxt}.acl`
+    const turtle = `@prefix acl: <http://www.w3.org/ns/auth/acl#> . @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+<#public> a acl:Authorization ; acl:accessTo <${listTxt}> ; acl:mode acl:Read ; acl:agentClass foaf:Agent .
+<#bob> a acl:Authorization ; acl:accessTo <${listTxt}> ; acl:mode acl:Read, acl:Write ; acl:agent <did:key:z6MkWacBob> .`
+    const put = await store.fetcher.webOperation('PUT', aclDoc, { data: turtle, contentType: 'text/turtle' })
+
+    store.fetcher.unload(sym(aclDoc))
+    await store.fetcher.load(aclDoc, { force: true })
+    const ac = acl.readACL(sym(listTxt), sym(aclDoc), store)
+    const cleared = await store.fetcher.webOperation('PUT', aclDoc, { data: '@prefix acl: <http://www.w3.org/ns/auth/acl#> .', contentType: 'text/turtle' })
+
+    store.fetcher.unload(sym(aclDoc))
+    await store.fetcher.load(aclDoc, { force: true })
+    const after = acl.readACL(sym(listTxt), sym(aclDoc), store)
+
+    return { put: put.status, modes: { public: Object.keys(ac.agentClass['http://xmlns.com/foaf/0.1/Agent'] ?? {}), bob: Object.keys(ac.agent['did:key:z6MkWacBob'] ?? {}) }, cleared: cleared.status, afterCount: Object.keys(after.agent).length + Object.keys(after.agentClass).length }
+  }, listTxt)
+  check(`a WAC document PUT by a pane becomes grants (${wac.put}); read back: public ${wac.modes.public.map(m => m.split('#')[1]).join('+')}, bob ${wac.modes.bob.map(m => m.split('#')[1]).join('+')}`, wac.put === 204 && wac.modes.public.some(m => /Read$/.test(m)) && wac.modes.bob.some(m => /Write$/.test(m)))
+  const grantsNow = await (await fetch(`${STORAGE}-/access/grants`, { headers: { accept: 'application/lws+json' } })).json()
+  check(`an empty WAC document revokes them (${wac.cleared}); none left in the read-back and none covering list.txt on the server`, wac.cleared === 204 && wac.afterCount === 0 && grantsNow.totalItems === 0)
+
   // A JSON-LD resource written through the store is updated with a JSON merge patch
   // of just the changed keys, not a whole-document PUT.
   const jsonld = await page.evaluate(async (storage) => {

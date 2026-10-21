@@ -21,7 +21,7 @@ import { LWS } from './client.js'
 const LDP = 'http://www.w3.org/ns/ldp#'
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
 
-export function installLwsWrites (store, { isLws }) {
+export function installLwsWrites (store, { isLws, wac = null }) {
   const fetcher = store.fetcher
   const updater = store.updater
 
@@ -99,10 +99,37 @@ export function installLwsWrites (store, { isLws }) {
     const headers = new Headers(options.headers ?? {})
 
 
-    // Web Access Control documents don't exist in LWS (access is by ODRL grants):
-    // panes that write .acl/.meta beside what they create get a quiet success,
-    // and reading one is a clean 404 rather than a stray data resource.
+    // Web Access Control documents don't exist in LWS (access is by ODRL grants).
+    // With a WAC bridge (wac.js), <doc>.acl is a view of the grants that target the
+    // document: read as Turtle, and written back as grants made and revoked. Without
+    // one, and for .meta, writes get a quiet success and reads a clean 404.
     if (/\.(acl|meta)$/.test(target)) {
+      const resource = target.replace(/\.acl$/, '')
+
+      if (wac && target.endsWith('.acl') && wac.applies(resource)) {
+        try {
+          if (['GET', 'HEAD'].includes(method)) {
+            const body = await wac.read(resource)
+
+            return new Response(method === 'HEAD' ? null : body, { status: 200, headers: { 'content-type': 'text/turtle', etag: `"wac-${body.length}"`, link: `<${resource}>; rel="describes"` } })
+          }
+
+          if (['PUT', 'PATCH'].includes(method) && typeof options.body === 'string') {
+            await wac.write(resource, options.body)
+
+            return new Response(null, { status: 204 })
+          }
+
+          if (method === 'DELETE') {
+            await wac.write(resource, '')
+
+            return new Response(null, { status: 204 })
+          }
+        } catch (error) {
+          return new Response(String(error?.message ?? error), { status: 502, statusText: 'WAC bridge' })
+        }
+      }
+
       return new Response(null, ['PUT', 'PATCH', 'DELETE', 'POST'].includes(method) ? { status: 204 } : { status: 404, statusText: 'Not Found' })
     }
 

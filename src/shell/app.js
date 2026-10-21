@@ -254,8 +254,8 @@ export class LwsShell extends SearchMixin(SharingMixin(InboxMixin(IdentityMixin(
         ${this.listing || this.resource ? html`
           <button aria-pressed=${this.view === 'native'} @click=${() => { this.view = 'native' }}>Native</button>
           <button aria-pressed=${this.view === 'pane'} @click=${() => { this.view = 'pane'; this.mountPane() }}>SolidOS pane</button>
-          ${this.description ? html`<button id="share" aria-pressed=${this.view === 'share'} @click=${() => this.openSharing()}>Sharing</button>` : nothing}
         ` : nothing}
+        ${this.url && this.description && isLws(this.url) ? html`<button id="share" aria-pressed=${this.view === 'share'} @click=${() => this.openSharing()}>Sharing</button>` : nothing}
         ${this.view === 'pane' && this.available.length > 1 ? this.available.map(p => html`
           <button class="pane-pick" aria-pressed=${p.name === this.paneName} @click=${() => this.mountPane(p.name)}>${p.name}</button>`) : nothing}
       </nav>

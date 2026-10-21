@@ -83,3 +83,4 @@ lws-shell tbody tr:hover td.actions button, lws-shell td.actions button:focus { 
 lws-shell .badge { display: inline-block; min-width: 1.4em; padding: 0 .4em; border-radius: 999px; background: var(--solid-ui-color-primary, #7c4dff); color: #fff; font-size: var(--solid-ui-font-size-xs, .75rem); text-align: center; }
 lws-shell > header button[aria-pressed="true"] .badge { background: #fff; color: var(--solid-ui-color-primary, #7c4dff); }
 lws-shell .access { margin: 0 0 .75rem; }
+lws-shell #request-access { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }

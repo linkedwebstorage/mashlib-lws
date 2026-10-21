@@ -5,6 +5,7 @@
 import { store } from 'solid-logic'
 import { utils } from 'solid-ui'
 import { LwsClient } from '../lws/client.js'
+import { WacBridge } from '../lws/wac.js'
 import { installLwsAdapter } from '../lws/adapter.js'
 import { installLwsWrites } from '../lws/writes.js'
 import * as solidPanes from 'solid-panes' // registers every SolidOS pane at import
@@ -55,8 +56,11 @@ try {
   if (remembered && !location.hash) { localStorage.removeItem('preLoginRedirectHash'); location.hash = remembered }
 } catch {}
 
+// The WAC bridge: panes' .acl reads and writes become grant reads and writes.
+const wac = storage ? new WacBridge({ client, storage }) : null
+
 installLwsAdapter(store, { client, isLwsContainer })
-installLwsWrites(store, { isLws })
+installLwsWrites(store, { isLws, wac })
 if (storage) store.fetcher.__lwsRegisterStorage(storage)
 
 // Every SolidOS pane, from solid-panes' registry, with the context it builds
@@ -86,4 +90,4 @@ const parentOf = (url) => new URL('.', url.endsWith('/') ? url.slice(0, -1) : ur
 const nameOf = (url) => decodeURIComponent((url.endsWith('/') ? url.slice(0, -1) : url).split('/').pop())
 const minting = () => registry.list.filter(p => typeof p.mintNew === 'function' && !p.global)
 
-export { POD, subjectFromLocation, storage, isLws, isLwsContainer, client, registry, paneContext, GENERIC, POLL_MS, CID_NAME, parentOf, nameOf, minting, TEXT_TYPES }
+export { wac, POD, subjectFromLocation, storage, isLws, isLwsContainer, client, registry, paneContext, GENERIC, POLL_MS, CID_NAME, parentOf, nameOf, minting, TEXT_TYPES }
