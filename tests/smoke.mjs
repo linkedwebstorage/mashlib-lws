@@ -141,6 +141,19 @@ try {
   const longChat = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'long chat' && h.querySelector('table, div, textarea') && location.hash.slice(1) }, { timeout: 30000 })
   check(`long chat minted from the New menu and its pane mounted: ${longChat.replace(STORAGE, '')}`, /long-chat-\d+\/index\.ttl#this$/.test(longChat))
 
+  // Search: the type index knows the long chat's class because the write declared it
+  // (Link rel="type" from the Turtle body), and type search finds its document.
+  await page.evaluate(() => document.querySelector('lws-shell #search').click())
+  const LONG_CHAT = 'http://www.w3.org/ns/pim/meeting#LongChat'
+  const chips = await page.waitFor((t) => { const c = [...document.querySelectorAll('lws-shell .chip')]; return c.length && c.some(b => b.title === t) ? c.map(b => b.title) : false }, { timeout: 20000, args: [LONG_CHAT] }).catch(() => [])
+  check(`search view lists the storage's types (${chips.length}), including LongChat`, chips.includes(LONG_CHAT))
+  await page.evaluate((t) => [...document.querySelectorAll('lws-shell .chip')].find(b => b.title === t).click(), LONG_CHAT)
+  const found = await page.waitFor((doc) => { const a = [...document.querySelectorAll('lws-shell .results a')]; return a.length ? a.map(x => x.getAttribute('href').slice(1)) : false }, { timeout: 20000 }).catch(() => [])
+  check(`type search for LongChat finds the minted chat: ${found.length} result(s)`, found.includes(longChat.split('#')[0]))
+  await page.evaluate((u) => { location.hash = u }, found[0] ?? longChat)
+  await page.waitFor(() => document.querySelector('lws-shell').view !== 'search', { timeout: 10000 }).catch(() => {})
+  check('opening a result leaves the search view', await page.evaluate(() => document.querySelector('lws-shell').view !== 'search'))
+
   // A JSON-LD resource written through the store is updated with a JSON merge patch
   // of just the changed keys, not a whole-document PUT.
   const jsonld = await page.evaluate(async (storage) => {

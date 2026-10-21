@@ -47,6 +47,26 @@ try {
   const pane = await page.waitFor(() => { const h = document.querySelector('lws-shell .pane-host'); return h?.dataset.pane === 'profile' && /Alice LWS/.test(h.textContent) && h.dataset.pane }, { timeout: 60000 })
   check('card.ttl#me from the pod: profile pane shows Alice LWS', pane === 'profile')
 
+  // Same-origin, the search goes as a real HTTP QUERY.
+  await page.goto(`${STORAGE}notes/`)
+  await page.waitFor(() => !!document.querySelector('lws-shell #search'), { timeout: 60000 })
+  const queried = await page.evaluate(async () => {
+    const seen = []
+    const realFetch = window.fetch
+
+    window.fetch = (input, init = {}) => { seen.push((init.method ?? 'GET').toUpperCase()); return realFetch(input, init) }
+    document.querySelector('lws-shell #search').click()
+    await new Promise(r => setTimeout(r, 1500))
+    const chip = [...document.querySelectorAll('lws-shell .chip')].find(b => b.title === 'https://www.w3.org/ns/lws#Container')
+
+    chip?.click()
+    await new Promise(r => setTimeout(r, 1500))
+    window.fetch = realFetch
+
+    return { query: seen.includes('QUERY'), results: document.querySelectorAll('lws-shell .results a').length }
+  })
+  check(`search on the pod uses HTTP QUERY and finds containers (${queried.results})`, queried.query && queried.results > 0)
+
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))
   await page.screenshot(new URL('../.shots/pod.png', import.meta.url).pathname)

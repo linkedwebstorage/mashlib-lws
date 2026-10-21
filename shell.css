@@ -24,3 +24,9 @@ lws-shell .create { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem;
 lws-shell .create form { display: flex; gap: .4rem; }
 lws-shell .create input { padding: .25rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
 lws-shell .pane-host { max-width: 60rem; }
+lws-shell .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 1rem; }
+lws-shell .chip { border-radius: 999px; font-size: .85rem; }
+lws-shell .results { list-style: none; padding: 0; margin: .5rem 0; }
+lws-shell .results li { padding: .3rem 0; border-bottom: 1px solid #eef2f7; }
+lws-shell .results a { color: #083575; text-decoration: none; }
+lws-shell #search-text { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }

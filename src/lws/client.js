@@ -63,6 +63,52 @@ export class LwsClient {
     return null
   }
 
+  /** Service endpoints from a storage description, by type: { TypeIndexService: url, … }. */
+  static services (description) {
+    const out = {}
+
+    for (const service of [].concat(description?.service ?? [])) {
+      for (const type of [].concat(service.type ?? [])) if (service.serviceEndpoint) out[type] = service.serviceEndpoint
+    }
+
+    return out
+  }
+
+  /** The storage's type index (lws10-searchindex): the IRIs of every type it holds. */
+  async typeIndex (endpoint) {
+    const response = await this.fetch(endpoint, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    return (await response.json()).items?.map(item => item.id) ?? []
+  }
+
+  /**
+   * Type search (lws10-searchindex): `filters` is { type: [...], <rel>: [...] } in
+   * conjunctive normal form (an array element that is itself an array is an OR group).
+   * Sent as an HTTP QUERY with application/lws-query+json; a host whose CORS
+   * preflight does not allow QUERY (JSS's doesn't yet) gets lwsd's GET form instead.
+   * Returns [{ url, format?, container? }].
+   */
+  async search (endpoint, filters) {
+    let response
+
+    try {
+      response = await this.fetch(endpoint, { method: 'QUERY', headers: { 'content-type': 'application/lws-query+json', accept: 'application/lws+json' }, body: JSON.stringify(filters) })
+    } catch {
+      const url = new URL(endpoint)
+
+      for (const [key, groups] of Object.entries(filters)) for (const group of groups) url.searchParams.append(key, [].concat(group).join(','))
+      response = await this.fetch(url.href, { headers: { accept: 'application/lws+json' } })
+    }
+
+    if (!response.ok) throw new LwsError(response, endpoint)
+
+    const page = await response.json()
+
+    return (page.items ?? []).map(item => ({ url: new URL(item.id, endpoint).href, format: item.format, container: item.id.endsWith('/') }))
+  }
+
   /** GET a data resource: { body, contentType, etag }. */
   async get (url, accept) {
     const response = await this.fetch(url, accept ? { headers: { accept } } : {})

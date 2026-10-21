@@ -95,7 +95,8 @@ export class LwsShell extends LitElement {
     description: { state: true },
     error: { state: true },
     notice: { state: true },
-    view: { state: true }, // 'native' | 'pane'
+    view: { state: true }, // 'native' | 'pane' | 'search'
+    search: { state: true },
     paneName: { state: true },
     editing: { state: true },
   }
@@ -116,6 +117,70 @@ export class LwsShell extends LitElement {
     this.editing = false
     this.paneElement = null
     this.available = []
+    this.search = null // { types, selected, results, text } while the search view is open
+  }
+
+  // Search: the storage's type index (what classes it holds) and type search
+  // (which resources hold a class), from the description's services.
+  async openSearch () {
+    this.view = 'search'
+    this.error = null
+    this.search ??= { types: [], selected: [], results: null, text: '' }
+
+    const services = LwsClient.services(this.description)
+
+    if (!services.TypeIndexService || !services.TypeSearchService) {
+      this.error = 'This storage advertises no type index / type search service'
+
+      return
+    }
+
+    try {
+      this.search = { ...this.search, types: await client.typeIndex(services.TypeIndexService) }
+      if (this.search.selected.length) await this.runSearch()
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async toggleType (type) {
+    const selected = this.search.selected.includes(type) ? this.search.selected.filter(t => t !== type) : [...this.search.selected, type]
+
+    this.search = { ...this.search, selected }
+    await this.runSearch()
+  }
+
+  async runSearch () {
+    const services = LwsClient.services(this.description)
+
+    if (!this.search.selected.length) { this.search = { ...this.search, results: null }; return }
+
+    try {
+      this.search = { ...this.search, results: await client.search(services.TypeSearchService, { type: this.search.selected }) }
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  renderSearch () {
+    const { types, selected, results, text } = this.search ?? { types: [], selected: [], results: null, text: '' }
+    const local = (iri) => iri.split(/[#/]/).filter(Boolean).pop()
+    const shown = (results ?? []).filter(r => !text || r.url.toLowerCase().includes(text.toLowerCase()))
+
+    return html`
+      <section class="search">
+        <p class="meta">Types in this storage (${types.length}); pick one or more — results must have all of them.</p>
+        <div class="chips">
+          ${types.map(t => html`<button class="chip" title=${t} aria-pressed=${selected.includes(t)} @click=${() => this.toggleType(t)}>${local(t)}</button>`)}
+        </div>
+        ${results ? html`
+          <p class="meta">${results.length} result${results.length === 1 ? '' : 's'}
+            · <input id="search-text" placeholder="filter by name" aria-label="Filter results by name" .value=${text} @input=${(e) => { this.search = { ...this.search, text: e.target.value } }}></p>
+          <ul class="results">
+            ${shown.map(r => html`<li><a href="#${r.url}">${decodeURIComponent(r.url.replace(this.storage, ''))}</a> <span class="meta">${r.container ? 'Container' : r.format ?? ''}</span></li>`)}
+          </ul>` : nothing}
+      </section>
+    `
   }
 
   async connectedCallback () {
@@ -160,6 +225,7 @@ export class LwsShell extends LitElement {
   get docUrl () { return this.url.split('#')[0] }
 
   async open (url) {
+    if (this.view === 'search') this.view = 'native'
     this.url = url
     this.error = null
     this.notice = null
@@ -299,6 +365,7 @@ export class LwsShell extends LitElement {
           <button>Open</button>
         </form>
         ${this.description ? html`<span title=${JSON.stringify(this.description).slice(0, 200)}>storage description ✓</span>` : nothing}
+        ${this.description ? html`<button id="search" aria-pressed=${this.view === 'search'} @click=${() => this.openSearch()}>Search</button>` : nothing}
         <solid-ui-account></solid-ui-account>
       </header>
       <nav aria-label="Breadcrumb">
@@ -314,9 +381,11 @@ export class LwsShell extends LitElement {
       <main>
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
         ${this.notice ? html`<p class="notice">${this.notice}</p>` : nothing}
-        ${this.view === 'pane'
-          ? html`<div class="pane-host" data-pane=${this.paneName ?? ''}>${this.paneElement ?? 'Loading pane…'}</div>`
-          : html`${this.listing ? this.renderListing() : nothing}${this.resource ? this.renderResource() : nothing}`}
+        ${this.view === 'search'
+          ? this.renderSearch()
+          : this.view === 'pane'
+            ? html`<div class="pane-host" data-pane=${this.paneName ?? ''}>${this.paneElement ?? 'Loading pane…'}</div>`
+            : html`${this.listing ? this.renderListing() : nothing}${this.resource ? this.renderResource() : nothing}`}
       </main>
     `
   }

@@ -43,7 +43,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 |---|---|
 | `src/lws/client.js` | LWS 1.0 client: containers (`application/lws+json`), resources, POST-to-create, conditional PUT, storage description. Takes any `fetch` |
 | `src/lws/adapter.js` | Wraps the shared rdflib store's `fetcher.load`: an LWS container listing becomes `ldp:contains` (and `lws:`) triples, so SolidOS panes read it as a folder |
-| `src/lws/writes.js` | Wraps the fetcher's transport and the updater: ETags remembered and sent as `If-Match`; a PUT that 404s becomes POST + `Slug` into its container (missing containers created); `ldp:BasicContainer` → `lws#Container`; `updater.update` on an LWS document is read-modify-PUT of the whole document (no RDF PATCH in LWS) |
+| `src/lws/writes.js` | Wraps the fetcher's transport and the updater: `Link rel="type"` for the classes in every RDF body written (the type index learns from headers); ETags remembered and sent as `If-Match`; a PUT that 404s becomes POST + `Slug` into its container (missing containers created); `ldp:BasicContainer` → `lws#Container`; `updater.update` on an LWS document is read-modify-PUT of the whole document (no RDF PATCH in LWS) |
 | `src/shell/app.js` | The shell (`<lws-shell>`, Lit): storage, breadcrumb, native listing and resource view, and a slot that mounts a SolidOS pane for the current subject |
 | `index.html` | Loads `solidos-nobuild`'s import map and theme, then the shell |
 | `boot.js` | The same, as one module for a server to serve on its own pages (`lwsd --browser`); the page's URL is the subject |
@@ -62,7 +62,7 @@ node tests/pod.mjs        # the shell served by the storage (lwsd --browser, see
 | Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ all of solid-panes' registry; the pane is picked by `label(subject)`, generic ones (source, default, …) offered but not defaulted; `mintNew` for every creating pane |
 | Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; the client shares the store's authenticated transport; did:key / CID provider still to do |
 | Sharing | WAC `.acl` editor | ODRL access requests / grants | new pane |
-| Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` | new search pane |
+| Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` (lws10-searchindex) | ✅ Search view: the storage's types as chips, type search (HTTP QUERY, `application/lws-query+json`; lwsd's GET form when the host's CORS preflight refuses QUERY) with a name filter. Every RDF write declares the classes in its body as `Link rel="type"`, so minted things are indexed |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | polling or a relay; open |
 | Inbox | LDP inbox | `NotificationService` (AS2) | new pane |
 | Served by the pod | JSS `--mashlib-module` | lwsd `--browser` serving this page for `/lws/` navigations | ✅ `boot.js`; real URLs as the address |

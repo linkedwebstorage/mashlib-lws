@@ -14,11 +14,12 @@
 // except a JSON-LD document in the shape this module writes, which gets a JSON
 // merge patch (RFC 7396) of just the changed keys.
 
-import { graph, serialize, sym } from 'rdflib'
+import { graph, parse, serialize, sym } from 'rdflib'
 import { toJsonLd } from 'solidos-nobuild/src/lib/write-fallback.js'
 import { LWS } from './client.js'
 
 const LDP = 'http://www.w3.org/ns/ldp#'
+const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type'
 
 export function installLwsWrites (store, { isLws }) {
   const fetcher = store.fetcher
@@ -80,6 +81,14 @@ export function installLwsWrites (store, { isLws }) {
       const link = headers.get('link') ?? ''
 
       if (/ldp#(Basic)?Container/.test(link)) headers.set('link', `<${LWS}Container>; rel="type"`)
+    }
+
+    // The storage's type index (lws10-searchindex) learns types from Link headers at
+    // write time, not from bodies. So every RDF document written declares the classes
+    // of the things in it — a chat's index.ttl says it holds a meeting:LongChat — and
+    // the search pane can find them.
+    if (['PUT', 'POST'].includes(method) && typeof options.body === 'string') {
+      for (const type of await typesIn(options.body, headers.get('content-type'), target)) headers.append('link', `<${type}>; rel="type"`)
     }
 
     if (['PUT', 'PATCH'].includes(method) && !headers.has('if-match') && etags.has(target)) headers.set('if-match', etags.get(target))
@@ -220,6 +229,21 @@ export function installLwsWrites (store, { isLws }) {
     if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map(k => [k, sortKeys(v[k])]))
 
     return v
+  }
+
+  // The rdf:type classes (IRIs) of every subject in an RDF body; [] for anything else.
+  async function typesIn (body, contentType, base) {
+    const type = (contentType ?? '').split(';')[0].trim()
+
+    if (!['text/turtle', 'application/ld+json', 'application/n-triples'].includes(type)) return []
+
+    const kb = graph()
+
+    try {
+      await new Promise((resolve, reject) => parse(body, kb, base.split('#')[0], type, (err) => err ? reject(err) : resolve()))
+    } catch { return [] }
+
+    return [...new Set(kb.statementsMatching(null, sym(RDF_TYPE), null).map(s => s.object).filter(o => o.termType === 'NamedNode').map(o => o.value))].slice(0, 32)
   }
 
   function sameTriple (a, b) {
