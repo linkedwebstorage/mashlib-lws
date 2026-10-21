@@ -147,9 +147,13 @@ try {
   const LONG_CHAT = 'http://www.w3.org/ns/pim/meeting#LongChat'
   const chips = await page.waitFor((t) => { const c = [...document.querySelectorAll('lws-shell .chip')]; return c.length && c.some(b => b.title === t) ? c.map(b => b.title) : false }, { timeout: 20000, args: [LONG_CHAT] }).catch(() => [])
   check(`search view lists the storage's types (${chips.length}), including LongChat`, chips.includes(LONG_CHAT))
+  const methodsSeen = []
+  await page.evaluate(() => { window.__methods = []; const real = window.fetch; window.fetch = (i, init = {}) => { window.__methods.push((init.method ?? 'GET').toUpperCase()); return real(i, init) } })
   await page.evaluate((t) => [...document.querySelectorAll('lws-shell .chip')].find(b => b.title === t).click(), LONG_CHAT)
   const found = await page.waitFor((doc) => { const a = [...document.querySelectorAll('lws-shell .results a')]; return a.length ? a.map(x => x.getAttribute('href').slice(1)) : false }, { timeout: 20000 }).catch(() => [])
   check(`type search for LongChat finds the minted chat: ${found.length} result(s)`, found.includes(longChat.split('#')[0]))
+  methodsSeen.push(...await page.evaluate(() => window.__methods))
+  check('cross-origin, the search went as an HTTP QUERY (the server answers the CORS preflight for it)', methodsSeen.includes('QUERY'))
   await page.evaluate((u) => { location.hash = u }, found[0] ?? longChat)
   await page.waitFor(() => document.querySelector('lws-shell').view !== 'search', { timeout: 10000 }).catch(() => {})
   check('opening a result leaves the search view', await page.evaluate(() => document.querySelector('lws-shell').view !== 'search'))
