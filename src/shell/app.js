@@ -695,7 +695,7 @@ export class LwsShell extends LitElement {
         <solid-ui-account></solid-ui-account>
       </header>
       <nav aria-label="Breadcrumb">
-        ${crumbs.map((c, i) => html`${i ? '›' : ''} <a href="#${c.url}">${c.label}</a>`)}
+        ${crumbs.map((c, i) => html`${i ? html`<span class="sep">›</span>` : ''}<a href="#${c.url}">${c.label}</a>`)}
         <span class="spacer"></span>
         ${this.listing || this.resource ? html`
           <button aria-pressed=${this.view === 'native'} @click=${() => { this.view = 'native' }}>Native</button>
@@ -725,16 +725,25 @@ export class LwsShell extends LitElement {
   renderListing () {
     const { items, totalItems, etag } = this.listing
 
+    const isRoot = this.url === this.storage
+    const name = isRoot ? new URL(this.storage).host + new URL(this.storage).pathname : nameOf(this.url)
+
     return html`
-      <p class="meta">${totalItems} item${totalItems === 1 ? '' : 's'} · ETag ${etag}</p>
+      <div class="title">
+        ${isRoot ? nothing : html`<a class="back" href="#${parentOf(this.url)}" title="Up"><icon-lucide-arrow-left></icon-lucide-arrow-left></a>`}
+        <icon-lucide-folder></icon-lucide-folder>
+        <h2>${name}</h2>
+        <span class="meta">${totalItems} item${totalItems === 1 ? '' : 's'}</span>
+        <icon-lucide-globe title=${`ETag ${etag}`}></icon-lucide-globe>
+      </div>
       <table>
         <thead><tr><th>Name</th><th>Type</th><th class="num">Size</th><th>Modified</th></tr></thead>
         <tbody>
           ${items.map(item => html`<tr>
-            <td><a href="#${item.url}">${decodeURIComponent(item.url.slice(this.url.length))}</a></td>
-            <td>${item.container ? 'Container' : item.format ?? 'DataResource'}</td>
+            <td><a href="#${item.url}">${item.container ? html`<icon-lucide-folder></icon-lucide-folder>` : nothing}${decodeURIComponent(item.url.slice(this.url.length))}</a></td>
+            <td class="type">${item.container ? 'Container' : item.format ?? 'DataResource'}</td>
             <td class="num">${item.size ?? ''}</td>
-            <td>${item.modified ? new Date(item.modified).toLocaleString() : ''}</td>
+            <td class="when">${item.modified ? new Date(item.modified).toLocaleString() : ''}</td>
           </tr>`)}
         </tbody>
       </table>

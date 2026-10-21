@@ -50,7 +50,7 @@ node tests/run-all.mjs    # all four, one after another
 | `src/shell/app.js` | The shell (`<lws-shell>`, Lit): storage, breadcrumb, native listing and resource view, and a slot that mounts a SolidOS pane for the current subject |
 | `index.html` | Loads `solidos-nobuild`'s import map and theme, then the shell |
 | `boot.js` | The same, as one module for a server to serve on its own pages (`lwsd --browser`); the page's URL is the subject |
-| `shell.css` | The shell's stylesheet, shared by both |
+| `shell.css` | The shell's stylesheet, shared by both: solid-ui's tokens throughout, and mashlib's chrome — slate header bar, white navbar card with underlined tabs, secondary-style buttons, a file-explorer title row over the listing. The panes themselves are solid-ui's, unchanged |
 
 ## Roadmap: parity with mashlib, on LWS
 

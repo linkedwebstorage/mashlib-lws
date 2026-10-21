@@ -1,44 +1,73 @@
-/* The shell renders into light DOM (so mounted panes get their stylesheets); its CSS lives here. */
-lws-shell { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
-lws-shell > header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1.25rem; background: #1d293d; color: #fff; }
-lws-shell > header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
-lws-shell > header form { display: flex; gap: .5rem; flex: 1; }
+/* The shell renders into light DOM (so mounted panes get their stylesheets); its CSS lives here.
+   Colours, sizes and shapes are solid-ui's tokens (theme.css from solidos-nobuild), and the
+   chrome follows mashlib's: a slate header bar, a white navbar card with underlined tabs,
+   secondary-style buttons, a file-explorer title row above the listing. */
+lws-shell { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; background: var(--solid-ui-color-white, #fff); color: var(--solid-ui-color-gray-800, #101828); }
+
+/* Header: like <solid-panes-header> */
+lws-shell > header { display: flex; align-items: center; gap: 10px; padding: 7px 20px; background: var(--solid-ui-color-slate-800, #1d293d); color: var(--solid-ui-color-white, #fff); }
+lws-shell > header h1 { font-size: var(--solid-ui-font-size-xl, 1.25rem); margin: 0 6px 0 0; font-weight: 700; letter-spacing: .02em; }
+lws-shell > header form { display: flex; gap: 6px; flex: 1; max-width: 40rem; }
+lws-shell > header input { flex: 1; min-width: 0; height: var(--solid-ui-clickable-area, 42px); padding: 0 12px; border: 1px solid var(--solid-ui-color-slate-400, #90a1b9); border-radius: 5px; font: inherit; box-sizing: border-box; }
+lws-shell > header > span { font-size: var(--solid-ui-font-size-sm, .875rem); color: var(--solid-ui-color-slate-200, #e2e8f0); }
 lws-shell > header solid-ui-account { margin-left: auto; }
-lws-shell > header input { flex: 1; min-width: 0; padding: .35rem .6rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
-lws-shell > nav { display: flex; align-items: center; gap: .5rem; padding: .5rem 1.25rem; border-bottom: 1px solid #e2e8f0; font-size: .9rem; flex-wrap: wrap; }
-lws-shell > nav a { color: #083575; text-decoration: none; }
+/* buttons in the header: solid-ui's outline variant on dark */
+lws-shell > header button { color: currentColor; background: transparent; border-color: currentColor; }
+lws-shell > header button:hover { background: color-mix(in srgb, currentColor 25%, transparent); color: currentColor; border-color: currentColor; }
+lws-shell > header button[aria-pressed="true"] { background: var(--solid-ui-color-primary, #7c4dff); border-color: var(--solid-ui-color-primary, #7c4dff); }
+
+/* Navbar: like <solid-panes-navbar>, a white card with underlined tabs */
+lws-shell > nav { display: flex; align-items: center; gap: 2px; margin: 10px 16px 0; border: 1px solid var(--solid-ui-color-slate-200, #e2e8f0); border-radius: 5px; background: var(--solid-ui-color-white, #fff); font-size: 90%; flex-wrap: wrap; overflow: hidden; }
+lws-shell > nav a { color: var(--solid-ui-color-tertiary, #083575); text-decoration: none; padding: 10px 0; }
+lws-shell > nav a:first-of-type { padding-left: 16px; }
+lws-shell > nav .sep { color: var(--solid-ui-color-gray-400, #99a1af); }
 lws-shell > nav .spacer { flex: 1; }
-lws-shell button { font: inherit; padding: .25rem .6rem; border: 1px solid #90a1b9; background: #fff; border-radius: 5px; cursor: pointer; }
-lws-shell button[aria-pressed="true"] { background: #7c4dff; color: #fff; border-color: #7c4dff; }
-lws-shell > main { padding: 1.25rem; }
-lws-shell table { border-collapse: collapse; width: 100%; max-width: 60rem; }
-lws-shell th, lws-shell td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e2e8f0; font-size: .95rem; }
-lws-shell th { color: #4a5565; font-weight: 500; }
-lws-shell td a { color: #083575; text-decoration: none; }
+lws-shell > nav button { padding: 10px 25px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; font-weight: 500; font-size: inherit; background: transparent; color: inherit; height: auto; }
+lws-shell > nav button:hover, lws-shell > nav button[aria-pressed="true"] { border-bottom-color: var(--solid-ui-color-primary, #7c4dff); color: var(--solid-ui-color-primary, #7c4dff); background: color-mix(in srgb, currentColor 25%, transparent); border-radius: 0; }
+
+/* Buttons: solid-ui's secondary variant; aria-pressed = primary */
+lws-shell button { font: inherit; font-weight: 600; font-size: var(--solid-ui-font-size-sm, .875rem); padding: 5px 12px; min-height: 34px; border: 1px solid var(--solid-ui-color-slate-400, #90a1b9); background: var(--solid-ui-color-white, #fff); color: var(--solid-ui-color-gray-800, #101828); border-radius: 5px; cursor: pointer; }
+lws-shell button:hover { background: var(--solid-ui-color-tertiary, #083575); color: var(--solid-ui-color-white, #fff); border-color: var(--solid-ui-color-tertiary, #083575); }
+lws-shell button[aria-pressed="true"] { background: var(--solid-ui-color-primary, #7c4dff); color: var(--solid-ui-color-white, #fff); border-color: var(--solid-ui-color-primary, #7c4dff); }
+lws-shell input, lws-shell select { font: inherit; padding: 5px 10px; min-height: 34px; border: 1px solid var(--solid-ui-color-slate-400, #90a1b9); border-radius: 5px; box-sizing: border-box; background: var(--solid-ui-color-white, #fff); }
+
+lws-shell > main { padding: 10px 16px 24px; }
+
+/* Listing: a file-explorer title row, then the table */
+lws-shell .title { display: flex; align-items: center; gap: 10px; padding: 6px 0 10px; border-bottom: 1px solid var(--solid-ui-color-slate-200, #e2e8f0); margin-bottom: 6px; }
+lws-shell .title a.back { display: inline-flex; width: var(--solid-ui-clickable-area, 42px); height: var(--solid-ui-clickable-area, 42px); align-items: center; justify-content: center; font-size: 0; color: var(--solid-ui-color-gray-800, #101828); border-radius: 5px; }
+lws-shell .title a.back:hover { background: var(--solid-ui-color-gray-100, #f3f4f6); }
+lws-shell .title icon-lucide-folder, lws-shell .title icon-lucide-globe { width: 28px; height: 28px; display: inline-flex; }
+lws-shell .title a.back icon-lucide-arrow-left { width: 22px; height: 22px; display: inline-flex; }
+lws-shell .title icon-lucide-globe { width: 18px; height: 18px; color: var(--solid-ui-color-primary, #7c4dff); }
+lws-shell .title h2 { font-size: var(--solid-ui-font-size-xl, 1.25rem); font-weight: 500; margin: 0; }
+lws-shell .title .meta { margin: 0; }
+lws-shell table { border-collapse: collapse; width: 100%; }
+lws-shell th, lws-shell td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--solid-ui-color-slate-200, #e2e8f0); font-size: var(--solid-ui-font-size-md, 1rem); }
+lws-shell th { color: var(--solid-ui-color-gray-500, #6a7282); font-weight: 500; font-size: var(--solid-ui-font-size-sm, .875rem); }
+lws-shell tbody tr:hover { background: var(--solid-ui-color-slate-50, #f8fafc); }
+lws-shell td a { color: var(--solid-ui-color-tertiary, #083575); text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+lws-shell td a icon-lucide-folder { width: 18px; height: 18px; display: inline-flex; color: var(--solid-ui-color-gray-500, #6a7282); }
 lws-shell td.num { text-align: right; font-variant-numeric: tabular-nums; }
-lws-shell pre, lws-shell textarea { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 1rem; overflow: auto; max-width: 60rem; width: 100%; box-sizing: border-box; font: .9rem/1.4 ui-monospace, monospace; }
-lws-shell .meta { color: #6a7282; font-size: .85rem; margin: 0 0 .75rem; }
-lws-shell .error { color: #b00020; }
+lws-shell td.type, lws-shell td.when { color: var(--solid-ui-color-gray-600, #4a5565); font-size: var(--solid-ui-font-size-sm, .875rem); }
+lws-shell pre, lws-shell textarea { background: var(--solid-ui-color-slate-50, #f8fafc); border: 1px solid var(--solid-ui-color-slate-200, #e2e8f0); border-radius: 5px; padding: 1rem; overflow: auto; width: 100%; box-sizing: border-box; font: .9rem/1.4 ui-monospace, monospace; }
+lws-shell .meta { color: var(--solid-ui-color-gray-500, #6a7282); font-size: var(--solid-ui-font-size-sm, .875rem); margin: 0 0 .75rem; }
+lws-shell .error { color: var(--solid-ui-color-error, #b00020); }
 lws-shell .notice { color: #0a5027; }
 lws-shell .create { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
-lws-shell .create form { display: flex; gap: .4rem; }
-lws-shell .create input { padding: .25rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
-lws-shell .pane-host { max-width: 60rem; }
+lws-shell .create form { display: flex; gap: 6px; }
+lws-shell .pane-host { }
 lws-shell .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0 1rem; }
-lws-shell .chip { border-radius: 999px; font-size: .85rem; }
+lws-shell .chip { border-radius: 999px; font-weight: 500; }
 lws-shell .results { list-style: none; padding: 0; margin: .5rem 0; }
 lws-shell .results li { padding: .3rem 0; border-bottom: 1px solid #eef2f7; }
 lws-shell .results a { color: #083575; text-decoration: none; }
-lws-shell #search-text { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
-lws-shell .sharing h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
+lws-shell .sharing h3, lws-shell .inbox h3 { font-size: var(--solid-ui-font-size-lg, 1.125rem); font-weight: 500; margin: 1.25rem 0 .5rem; }
 lws-shell .grants, lws-shell .requests { list-style: none; padding: 0; margin: 0; }
 lws-shell .grants li, lws-shell .requests li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 lws-shell .policy { flex: 1 1 20rem; }
 lws-shell #new-grant { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
-lws-shell #new-grant input[name=assignee] { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
-lws-shell .inbox h3 { font-size: 1rem; margin: 1rem 0 .4rem; }
 lws-shell .notifications, lws-shell .subscriptions { list-style: none; padding: 0; margin: 0; }
 lws-shell .notifications li, lws-shell .subscriptions li { padding: .4rem 0; border-bottom: 1px solid #eef2f7; display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 lws-shell #subscribe { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: .75rem; }
-lws-shell #subscribe input { font: inherit; padding: .2rem .5rem; border: 1px solid #90a1b9; border-radius: 5px; }
 lws-shell .identity { font-size: .85rem; font-family: ui-monospace, monospace; display: inline-flex; gap: .4rem; align-items: center; }
