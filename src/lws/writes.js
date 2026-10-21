@@ -48,7 +48,18 @@ export function installLwsWrites (store, { isLws }) {
     return transport(url, { ...options, headers })
   }
 
-  async function ensureContainer (url) {
+  // One creation per container at a time: panes write several documents into a new
+  // container at once (a tracker's index.ttl and state.ttl), and all of them wait on
+  // the same POST rather than racing to make it.
+  const creating = new Map()
+
+  function ensureContainer (url) {
+    if (!creating.has(url)) creating.set(url, ensureContainerNow(url).finally(() => creating.delete(url)))
+
+    return creating.get(url)
+  }
+
+  async function ensureContainerNow (url) {
     if (!isLws(url) || url === storageRootOf(url)) return
 
     const head = await send(url, { method: 'HEAD' })
