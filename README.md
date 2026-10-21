@@ -4,7 +4,7 @@ A browser for [W3C Linked Web Storage](https://github.com/w3c/lws-protocol) (LWS
 
 The shell is LWS-native: containers, data resources, the storage description, and (as they land) search, access grants, notifications and the LWS identity suites. For everything that SolidOS already does well — profiles, address books, chat, trackers, meetings, notepads — it mounts the [SolidOS panes](https://github.com/JavaScriptSolidServer/solidos-nobuild) as plugins: an adapter lets them read LWS storage through the store they already use, so they run unchanged.
 
-Status: **milestone 1** — browse containers and resources, storage description, the SolidOS folder pane mounted on an LWS container.
+Status: **milestone 2** — browse, edit (conditional PUT, 412 on conflict) and create (folders, files) natively; SolidOS panes mounted on LWS containers and subjects, and they can create and edit through the store (chat `mintNew`, `updater.update` as read-modify-PUT).
 
 ## Run it
 
@@ -29,6 +29,7 @@ node tests/smoke.mjs      # milestone checks, headless Chromium
 |---|---|
 | `src/lws/client.js` | LWS 1.0 client: containers (`application/lws+json`), resources, POST-to-create, conditional PUT, storage description. Takes any `fetch` |
 | `src/lws/adapter.js` | Wraps the shared rdflib store's `fetcher.load`: an LWS container listing becomes `ldp:contains` (and `lws:`) triples, so SolidOS panes read it as a folder |
+| `src/lws/writes.js` | Wraps the fetcher's transport and the updater: ETags remembered and sent as `If-Match`; a PUT that 404s becomes POST + `Slug` into its container (missing containers created); `ldp:BasicContainer` → `lws#Container`; `updater.update` on an LWS document is read-modify-PUT of the whole document (no RDF PATCH in LWS) |
 | `src/shell/app.js` | The shell (`<lws-shell>`, Lit): storage, breadcrumb, native listing and resource view, and a slot that mounts a SolidOS pane for the current subject |
 | `index.html` | Loads `solidos-nobuild`'s import map and theme, then the shell |
 
@@ -38,11 +39,12 @@ node tests/smoke.mjs      # milestone checks, headless Chromium
 |---|---|---|---|
 | Browse folders and files | LDP containers | `application/lws+json` containers, `Link` types | ✅ native + adapter |
 | View data resources | GET | GET | ✅ native |
+| Edit (native) | PUT | conditional PUT; 412 on a stale ETag | ✅ |
 | Storage description | `pim:storage` | `lws#storage` link → `/-/description` (CID document) | ✅ discovered |
-| Edit (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); merge-patch for JSON | adapter for the updater |
-| Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | client has it; wire the panes' create path |
-| Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ folder pane; registry for the rest |
-| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | authenticated `fetch` for the client; did:key/CID provider |
+| Edit from panes (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); no RDF PATCH | ✅ `writes.js`: ETags, read-modify-PUT; merge-patch for JSON resources still to do |
+| Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | ✅ native forms; panes' PUT-to-create and `createContainer` translated |
+| Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ folder and chat panes, picked by `label(subject)`; the full registry next |
+| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | next: authenticated `fetch` for the client (chat's send needs a user); did:key/CID provider |
 | Sharing | WAC `.acl` editor | ODRL access requests / grants | new pane |
 | Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` | new search pane |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | polling or a relay; open |

@@ -79,7 +79,7 @@ export function installLwsAdapter (store, { client, isLwsContainer }) {
       store.removeDocument(doc)
       store.add(containerTriples(listing))
       fetcher.requested[url] = 'done'
-      fetcher.redirectedTo ??= {}
+      if (listing.etag) (fetcher.__lwsEtags ??= new Map()).set(url, listing.etag)
 
       return { ok: true, status: 200, url, headers: new Headers({ etag: listing.etag ?? '' }) }
     } catch (error) {

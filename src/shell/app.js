@@ -1,21 +1,22 @@
 // The shell: an LWS-native browser (containers, resources, storage) that can mount
 // SolidOS panes from solidos-nobuild for anything they do better.
 //
-// State is the URL hash: #<resource url>. Storage root from ?storage=, then
-// localStorage, then the default dev server.
+// State is the URL hash: #<subject url>. Storage root from ?storage=, then
+// localStorage, then the default dev server. The shell renders into light DOM, so
+// the panes' own stylesheets (which they add to <head>) apply to mounted panes.
 
-import { LitElement, html, css, nothing } from 'lit'
+import { LitElement, html, nothing } from 'lit'
 import { sym } from 'rdflib'
 import { solidLogicSingleton, store } from 'solid-logic'
 import { utils } from 'solid-ui'
-import { LwsClient } from '../lws/client.js'
+import { LwsClient, LwsError } from '../lws/client.js'
 import { installLwsAdapter } from '../lws/adapter.js'
+import { installLwsWrites } from '../lws/writes.js'
 import folderPane from 'folder-pane'
+import { shortChatPane } from 'chat-pane'
 
 const DEFAULT_STORAGE = 'http://127.0.0.1:8737/lws/'
-
-// LWS containers: any URL ending in "/" under the current storage root.
-const isLwsContainer = (url) => url.endsWith('/') && url.startsWith(currentStorage())
+const TEXT_TYPES = /^(text\/|application\/(json|ld\+json|xml|x-turtle|n-triples|sparql-update|javascript))/
 
 function currentStorage () {
   const param = new URL(location.href).searchParams.get('storage')
@@ -25,19 +26,25 @@ function currentStorage () {
   try { return localStorage.getItem('lws-storage') || DEFAULT_STORAGE } catch { return DEFAULT_STORAGE }
 }
 
+const storage = currentStorage()
+const isLws = (url) => url.startsWith(storage)
+const isLwsContainer = (url) => isLws(url) && url.endsWith('/')
 const client = new LwsClient()
 
 installLwsAdapter(store, { client, isLwsContainer })
+installLwsWrites(store, { isLws })
+store.fetcher.__lwsRegisterStorage(storage)
 
-// A pane context like solidos-nobuild's pane.html: the shared store, a registry of
-// the panes mounted here, and the outliner stubs panes expect.
-const panes = { folder: folderPane }
+// The SolidOS panes mounted here, in preference order, and the context they expect
+// (as solidos-nobuild's pane.html builds it).
+const panes = [shortChatPane, folderPane]
+const byName = Object.fromEntries(panes.map(p => [p.name, p]))
 const paneContext = {
   session: {
     store,
     paneRegistry: {
-      byName: (name) => panes[name] ?? { name: `missing:${name}`, label: () => null, render: (_s, c) => { const d = c.dom.createElement('div'); d.textContent = `Pane not mounted: ${name}`; return d } },
-      list: Object.values(panes),
+      byName: (name) => byName[name] ?? { name: `missing:${name}`, label: () => null, render: (_s, c) => { const d = c.dom.createElement('div'); d.textContent = `Pane not mounted: ${name}`; return d } },
+      list: panes,
       paneForIcon: {},
       paneForPredicate: {},
       register: () => {},
@@ -64,48 +71,34 @@ export class LwsShell extends LitElement {
     resource: { state: true },
     description: { state: true },
     error: { state: true },
+    notice: { state: true },
     view: { state: true }, // 'native' | 'pane'
+    paneName: { state: true },
+    editing: { state: true },
   }
 
-  static styles = css`
-    :host { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; font-family: 'Atkinson Hyperlegible Next', system-ui, sans-serif; color: #101828; }
-    header { display: flex; align-items: center; gap: 1rem; padding: .6rem 1.25rem; background: #1d293d; color: #fff; }
-    header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
-    header form { display: flex; gap: .5rem; flex: 1; }
-    header input { flex: 1; min-width: 0; padding: .35rem .6rem; border: 1px solid #90a1b9; border-radius: 5px; font: inherit; }
-    nav { display: flex; align-items: center; gap: .5rem; padding: .5rem 1.25rem; border-bottom: 1px solid #e2e8f0; font-size: .9rem; flex-wrap: wrap; }
-    nav a { color: #083575; text-decoration: none; }
-    nav .spacer { flex: 1; }
-    nav button { font: inherit; padding: .25rem .6rem; border: 1px solid #90a1b9; background: #fff; border-radius: 5px; cursor: pointer; }
-    nav button[aria-pressed="true"] { background: #7c4dff; color: #fff; border-color: #7c4dff; }
-    main { padding: 1.25rem; }
-    table { border-collapse: collapse; width: 100%; max-width: 60rem; }
-    th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e2e8f0; font-size: .95rem; }
-    th { color: #4a5565; font-weight: 500; }
-    td a { color: #083575; text-decoration: none; }
-    td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 1rem; overflow: auto; max-width: 60rem; }
-    .meta { color: #6a7282; font-size: .85rem; margin: 0 0 .75rem; }
-    .error { color: #b00020; }
-    .pane-host { max-width: 60rem; }
-  `
+  createRenderRoot () { return this } // light DOM: see the note at the top
 
   constructor () {
     super()
-    this.storage = currentStorage()
-    this.url = location.hash.slice(1) || this.storage
+    this.storage = storage
+    this.url = location.hash.slice(1) || storage
     this.listing = null
     this.resource = null
     this.description = null
     this.error = null
+    this.notice = null
     this.view = 'native'
+    this.paneName = null
+    this.editing = false
     this.paneElement = null
+    this.available = []
   }
 
   connectedCallback () {
     super.connectedCallback()
     window.addEventListener('hashchange', this.onHash)
-    client.description(this.storage).then(d => { this.description = d }).catch(() => {})
+    client.description(storage).then(d => { this.description = d }).catch(() => {})
     this.open(this.url)
   }
 
@@ -114,44 +107,115 @@ export class LwsShell extends LitElement {
     window.removeEventListener('hashchange', this.onHash)
   }
 
-  onHash = () => { this.open(location.hash.slice(1) || this.storage) }
+  onHash = () => { this.open(location.hash.slice(1) || storage) }
+
+  get docUrl () { return this.url.split('#')[0] }
 
   async open (url) {
     this.url = url
     this.error = null
+    this.notice = null
     this.listing = null
     this.resource = null
     this.paneElement = null
+    this.paneName = null
+    this.editing = false
+    this.available = []
 
     try {
       if (isLwsContainer(url)) {
         this.listing = await client.container(url)
+      } else if (url.includes('#')) {
+        this.view = 'pane' // a subject inside a document: only a pane can show it
+        await this.mountPane()
       } else {
         this.resource = await client.get(url)
       }
     } catch (error) {
       this.error = error.message
     }
+
+    if (this.view === 'pane' && !this.paneElement) await this.mountPane()
   }
 
-  // Mount a SolidOS pane for the current subject (loads through the adapter).
-  async mountPane () {
-    if (this.paneElement || !this.listing) return
+  // Load the document through the store (adapter for containers, rdflib for the
+  // rest), then mount the first pane that has a label for the subject.
+  async mountPane (name) {
+    const subject = sym(this.url)
 
-    await store.fetcher.load(this.url, { force: true })
-    this.paneElement = panes.folder.render(sym(this.url), paneContext)
+    await store.fetcher.load(this.docUrl, { force: !this.paneElement })
+
+    this.available = panes.filter(p => p.label(subject, paneContext))
+
+    const pane = (name && byName[name]) ?? this.available[0] ?? folderPane
+
+    this.paneName = pane.name
+    this.paneElement = pane.render(subject, paneContext)
     this.requestUpdate()
   }
 
   setStorage (e) {
     e.preventDefault()
 
-    const value = this.renderRoot.querySelector('#storage').value.trim().replace(/\/?$/, '/')
+    const value = this.querySelector('#storage').value.trim().replace(/\/?$/, '/')
 
     try { localStorage.setItem('lws-storage', value) } catch {}
-    this.storage = value
-    location.hash = value
+    location.href = `?storage=${encodeURIComponent(value)}#${value}`
   }
+
+  // --- writes ----------------------------------------------------------------
+
+  async save (e) {
+    e.preventDefault()
+
+    const body = this.querySelector('#editor').value
+
+    try {
+      const etag = await client.put(this.url, body, this.resource.contentType.split(';')[0], this.resource.etag)
+
+      this.resource = { ...this.resource, body, etag }
+      this.editing = false
+      this.notice = `Saved (ETag ${etag})`
+    } catch (error) {
+      this.error = error instanceof LwsError && error.status === 412
+        ? 'Changed on the server since you opened it (412). Reload to get the current version, then edit again.'
+        : error.message
+    }
+  }
+
+  async create (e) {
+    e.preventDefault()
+
+    const form = e.target
+    const slug = form.querySelector('[name=slug]').value.trim()
+    const container = form.dataset.kind === 'container'
+
+    if (!slug) return
+
+    try {
+      const url = await client.create(this.url, { slug, container, body: container ? undefined : '', contentType: 'text/plain' })
+
+      form.reset()
+      this.notice = `Created ${url}`
+      this.listing = await client.container(this.url)
+    } catch (error) {
+      this.error = error.message
+    }
+  }
+
+  async newChat () {
+    const newBase = `${this.url}chat-${Date.now()}/`
+
+    try {
+      const options = await shortChatPane.mintNew(paneContext, { newBase, pane: shortChatPane, noun: 'chat', noIndexHTML: true, div: document.createElement('div'), dom: document })
+
+      location.hash = options.newInstance.uri
+    } catch (error) {
+      this.error = `New chat: ${error.message}`
+    }
+  }
+
+  // --- render ----------------------------------------------------------------
 
   render () {
     const crumbs = this.crumbs()
@@ -168,15 +232,19 @@ export class LwsShell extends LitElement {
       <nav aria-label="Breadcrumb">
         ${crumbs.map((c, i) => html`${i ? '›' : ''} <a href="#${c.url}">${c.label}</a>`)}
         <span class="spacer"></span>
-        ${this.listing ? html`
+        ${this.listing || this.resource ? html`
           <button aria-pressed=${this.view === 'native'} @click=${() => { this.view = 'native' }}>Native</button>
-          <button aria-pressed=${this.view === 'pane'} @click=${() => { this.view = 'pane'; this.mountPane() }}>SolidOS folder pane</button>
+          <button aria-pressed=${this.view === 'pane'} @click=${() => { this.view = 'pane'; this.mountPane() }}>SolidOS pane</button>
         ` : nothing}
+        ${this.view === 'pane' && this.available.length > 1 ? this.available.map(p => html`
+          <button class="pane-pick" aria-pressed=${p.name === this.paneName} @click=${() => this.mountPane(p.name)}>${p.name}</button>`) : nothing}
       </nav>
       <main>
         ${this.error ? html`<p class="error">${this.error}</p>` : nothing}
-        ${this.listing ? (this.view === 'native' ? this.renderListing() : html`<div class="pane-host">${this.paneElement ?? 'Loading pane…'}</div>`) : nothing}
-        ${this.resource ? this.renderResource() : nothing}
+        ${this.notice ? html`<p class="notice">${this.notice}</p>` : nothing}
+        ${this.view === 'pane'
+          ? html`<div class="pane-host" data-pane=${this.paneName ?? ''}>${this.paneElement ?? 'Loading pane…'}</div>`
+          : html`${this.listing ? this.renderListing() : nothing}${this.resource ? this.renderResource() : nothing}`}
       </main>
     `
   }
@@ -197,32 +265,44 @@ export class LwsShell extends LitElement {
           </tr>`)}
         </tbody>
       </table>
+      <div class="create">
+        <form data-kind="container" @submit=${this.create}><input name="slug" placeholder="new folder" aria-label="New folder name"><button>New folder</button></form>
+        <form data-kind="resource" @submit=${this.create}><input name="slug" placeholder="new file.txt" aria-label="New file name"><button>New file</button></form>
+        <button id="new-chat" @click=${this.newChat}>New chat</button>
+      </div>
     `
   }
 
   renderResource () {
     const { body, contentType, etag } = this.resource
+    const editable = TEXT_TYPES.test(contentType ?? '')
 
     return html`
-      <p class="meta">${contentType} · ${body.length} bytes · ETag ${etag}</p>
-      <pre>${body}</pre>
+      <p class="meta">${contentType} · ${body.length} bytes · ETag ${etag}
+        ${editable && !this.editing ? html`· <button id="edit" @click=${() => { this.editing = true }}>Edit</button>` : nothing}
+      </p>
+      ${this.editing
+        ? html`<form @submit=${this.save}>
+            <textarea id="editor" rows="12" spellcheck="false" .value=${body}></textarea>
+            <p><button id="save">Save</button> <button type="button" @click=${() => { this.editing = false }}>Cancel</button></p>
+          </form>`
+        : html`<pre>${body}</pre>`}
     `
   }
 
   crumbs () {
-    const out = []
-    let at = this.storage
+    const out = [{ url: storage, label: new URL(storage).host + new URL(storage).pathname }]
 
-    out.push({ url: at, label: new URL(at).host + new URL(at).pathname })
+    if (!this.url.startsWith(storage)) return out
 
-    if (!this.url.startsWith(this.storage)) return out
+    let at = storage
 
-    const rest = this.url.slice(this.storage.length)
-
-    for (const part of rest.split('/').filter(Boolean)) {
-      at += part + (at + part + '/' === this.url || this.url.startsWith(at + part + '/') ? '/' : '')
+    for (const part of this.docUrl.slice(storage.length).split('/').filter(Boolean)) {
+      at += part + (this.docUrl.startsWith(at + part + '/') ? '/' : '')
       out.push({ url: at, label: decodeURIComponent(part) })
     }
+
+    if (this.url.includes('#')) out.push({ url: this.url, label: '#' + this.url.split('#')[1] })
 
     return out
   }
