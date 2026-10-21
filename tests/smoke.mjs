@@ -17,7 +17,14 @@ const text = (sel) => page.evaluate((s) => document.querySelector(`lws-shell ${s
 const click = (sel) => page.evaluate((s) => { const el = document.querySelector(`lws-shell ${s}`); if (!el) return false; el.click(); return true }, sel)
 const get = (url) => fetch(url).then(r => r.ok ? r.text() : null)
 
-// Restore the seed the checks assume (an earlier run's conflict step changes it).
+// Clear what earlier runs made in notes/ (the listing checks assume the seed plus
+// whatever this run adds), then restore the seed's list.txt.
+{
+  const listing = await fetch(`${STORAGE}notes/?page=1`, { headers: { accept: 'application/lws+json' } }).then(r => r.json()).catch(() => ({ items: [] }))
+  const debris = (listing.items ?? []).map(i => new URL(i.id, STORAGE).href).filter(u => /\/(chat|long-chat|proj|readme|page|thing|issue|named-by-test|source|folder|pad|meeting|contact|schedule|Dokieli)-[\w-]+(\.[a-z]+)?\/?$/.test(u) || /\/(page|readme)-[a-z0-9]{4}\.[a-z]+$/.test(u))
+
+  await Promise.all(debris.map(u => fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } }).catch(() => {})))
+}
 {
   const url = `${STORAGE}notes/list.txt`
   const etag = (await fetch(url, { method: 'HEAD' })).headers.get('etag')

@@ -56,7 +56,7 @@ node tests/run-all.mjs    # all four, one after another
 
 | mashlib feature | Solid mechanism | LWS mechanism | Here |
 |---|---|---|---|
-| Browse folders and files | LDP containers | `application/lws+json` containers, `Link` types | ✅ native + adapter |
+| Browse folders and files | LDP containers | `application/lws+json` containers, `Link` types, link-based pagination | ✅ native + adapter; `rel="next"` pages followed so a listing is whole |
 | View data resources | GET | GET | ✅ native |
 | Edit (native) | PUT | conditional PUT; 412 on a stale ETag | ✅ |
 | Storage description | `pim:storage` | `lws#storage` link → `/-/description` (CID document) | ✅ discovered |

@@ -16,6 +16,8 @@ export function parseLinks (header) {
   })
 }
 
+const MAX_PAGES = 50
+
 export class LwsClient {
   constructor ({ fetch: fetchImpl = globalThis.fetch.bind(globalThis) } = {}) {
     this.fetch = fetchImpl
@@ -31,6 +33,7 @@ export class LwsClient {
     if (!response.ok) throw new LwsError(response, url)
 
     const doc = await response.json()
+    const links = parseLinks(response.headers.get('link'))
     const items = (doc.items ?? []).map(item => ({
       url: new URL(item.id, url).href,
       container: item.type === 'Container',
@@ -39,7 +42,22 @@ export class LwsClient {
       modified: item.modified,
     }))
 
-    return { url, items, totalItems: doc.totalItems ?? items.length, etag: response.headers.get('etag'), links: parseLinks(response.headers.get('link')) }
+    // Link-based pagination (lws10-core): a listing larger than the server's page
+    // holds rel="next" links; follow them so the listing is whole, up to a cap.
+    let next = links.find(l => l.rel === 'next')?.href
+
+    for (let pages = 1; next && pages < MAX_PAGES; pages++) {
+      const page = await this.fetch(new URL(next, url).href, { headers: { accept: LWS_JSON } })
+
+      if (!page.ok) break
+
+      const more = await page.json()
+
+      items.push(...(more.items ?? []).map(item => ({ url: new URL(item.id, url).href, container: item.type === 'Container', format: item.format, size: item.size, modified: item.modified })))
+      next = parseLinks(page.headers.get('link')).find(l => l.rel === 'next')?.href
+    }
+
+    return { url, items, totalItems: doc.totalItems ?? items.length, etag: response.headers.get('etag'), links }
   }
 
   /**
