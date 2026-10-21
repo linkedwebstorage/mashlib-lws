@@ -87,6 +87,7 @@ const paneContext = {
 // Panes that label everything; shown, but never the default choice.
 const GENERIC = new Set(['default', 'internal', 'ui', 'sharing', 'source', 'n3', 'RDFXML', 'dataContents', 'humanReadable', 'tableOfClass', 'form', 'home'])
 const POLL_MS = 5000
+const CID_NAME = 'me.cid' // the CID document a published identity lives at, in the storage root
 const parentOf = (url) => new URL('.', url.endsWith('/') ? url.slice(0, -1) : url).href
 const nameOf = (url) => decodeURIComponent((url.endsWith('/') ? url.slice(0, -1) : url).split('/').pop())
 const minting = () => registry.list.filter(p => typeof p.mintNew === 'function' && !p.global)
@@ -151,6 +152,26 @@ export class LwsShell extends LitElement {
     }
   }
 
+  // Publish the key as a CID document in this storage and act as that URL from now on.
+  async publishCid () {
+    const url = `${this.storage}${CID_NAME}`
+
+    try {
+      const body = JSON.stringify(this.identity.cidDocument(url), null, 2)
+      const response = await client.fetch(url, { method: 'PUT', headers: { 'content-type': 'application/lws+cid' }, body })
+
+      if (!response.ok && response.status !== 201) throw new LwsError(response, url)
+
+      this.identity.cid = url
+      this.identity.cached = null
+      this.identity.save()
+      this.notice = `Published ${url}; acting as it from now on (its key: ${this.identity.did})`
+      if (this.view === 'pane') { this.paneElement = null; this.mountPane(this.paneName) }
+    } catch (error) {
+      this.error = `Could not publish the CID document: ${error.message}`
+    }
+  }
+
   forgetIdentity () {
     DidKeyIdentity.forget()
     this.identity = null
@@ -161,14 +182,18 @@ export class LwsShell extends LitElement {
 
   // The agent panes act as: the provider session's WebID, else the did:key.
   get me () {
-    return authn.currentUser() ?? (this.identity ? sym(this.identity.did) : undefined)
+    return authn.currentUser() ?? (this.identity ? sym(this.identity.agent) : undefined)
   }
 
   renderIdentity () {
     if (authn.currentUser()) return nothing
 
+    if (this.identity?.cid) {
+      return html`<span class="identity" title=${`${this.identity.cid} (key ${this.identity.did})`}><a href="#${this.identity.cid}">${this.identity.cid.replace(this.storage, '')}</a> <button id="forget-key" @click=${() => this.forgetIdentity()}>Forget key</button></span>`
+    }
+
     return this.identity
-      ? html`<span class="identity" title=${this.identity.did}>${this.identity.did.slice(0, 16)}…${this.identity.did.slice(-4)} <button id="forget-key" @click=${() => this.forgetIdentity()}>Forget key</button></span>`
+      ? html`<span class="identity" title=${this.identity.did}>${this.identity.did.slice(0, 16)}…${this.identity.did.slice(-4)} <button id="publish-cid" title="Put a CID document naming this key in the storage and act as its URL" @click=${() => this.publishCid()}>Publish as CID</button> <button id="forget-key" @click=${() => this.forgetIdentity()}>Forget key</button></span>`
       : html`<button id="use-key" title="Make an Ed25519 key in this browser and act as its did:key" @click=${() => this.createIdentity()}>Use a did:key</button>`
   }
 

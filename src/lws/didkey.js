@@ -29,12 +29,34 @@ export function didKeyOf (publicJwk) {
   return 'did:key:z' + base58(new Uint8Array([0xed, 0x01, ...b64uDecode(publicJwk.x)]))
 }
 
+const KID = 'key-1'
+
 export class DidKeyIdentity {
-  constructor ({ privateJwk, publicJwk }) {
+  constructor ({ privateJwk, publicJwk, cid = null }) {
     this.privateJwk = privateJwk
     this.publicJwk = publicJwk
     this.did = didKeyOf(publicJwk)
+    this.cid = cid // the URL of a CID document naming this key, once published
     this.cached = null
+  }
+
+  /** The agent URI this identity acts as: the CID URL if published, else the did:key. */
+  get agent () {
+    return this.cid ?? this.did
+  }
+
+  /**
+   * A W3C Controlled Identifier document (CID 1.0) for `url`, listing this key for
+   * authentication (lws10-authn-ssi-cid). Served as application/lws+cid, it makes
+   * the URL an agent a server can verify tokens for — one that can later list new
+   * keys, which a did:key cannot.
+   */
+  cidDocument (url) {
+    return {
+      '@context': ['https://www.w3.org/ns/cid/v1'],
+      id: url,
+      authentication: [{ id: `${url}#${KID}`, type: 'JsonWebKey', controller: url, publicKeyJwk: { kid: KID, ...this.publicJwk } }],
+    }
   }
 
   /** The identity in localStorage, or null. */
@@ -42,7 +64,7 @@ export class DidKeyIdentity {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')
 
-      return saved?.privateJwk && saved?.publicJwk ? new DidKeyIdentity(saved) : null
+      return saved?.privateJwk && saved?.publicJwk ? new DidKeyIdentity({ privateJwk: saved.privateJwk, publicJwk: saved.publicJwk, cid: saved.cid ?? null }) : null
     } catch {
       return null
     }
@@ -61,27 +83,31 @@ export class DidKeyIdentity {
   }
 
   save () {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ privateJwk: this.privateJwk, publicJwk: this.publicJwk })) } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ privateJwk: this.privateJwk, publicJwk: this.publicJwk, cid: this.cid })) } catch {}
   }
 
   static forget () {
     try { localStorage.removeItem(STORAGE_KEY) } catch {}
   }
 
-  /** A self-issued JWT for `audience` (the storage), reused until it nears expiry. */
+  /**
+   * A self-issued JWT for `audience` (the storage), reused until it nears expiry:
+   * sub = iss = client_id = the agent (CID URL, with the key named by kid, or did:key).
+   */
   async token (audience) {
     const now = Math.floor(Date.now() / 1000)
+    const agent = this.agent
 
-    if (this.cached && this.cached.audience === audience && this.cached.exp - 30 > now) return this.cached.jwt
+    if (this.cached && this.cached.audience === audience && this.cached.agent === agent && this.cached.exp - 30 > now) return this.cached.jwt
 
     const key = await crypto.subtle.importKey('jwk', this.privateJwk, { name: 'Ed25519' }, false, ['sign'])
-    const header = b64u(utf8(JSON.stringify({ typ: 'JWT', alg: 'EdDSA' })))
+    const header = b64u(utf8(JSON.stringify({ typ: 'JWT', alg: 'EdDSA', ...(this.cid ? { kid: KID } : {}) })))
     const exp = now + TOKEN_TTL_S
-    const payload = b64u(utf8(JSON.stringify({ sub: this.did, iss: this.did, client_id: this.did, aud: audience, iat: now, exp })))
+    const payload = b64u(utf8(JSON.stringify({ sub: agent, iss: agent, client_id: agent, aud: audience, iat: now, exp })))
     const signature = b64u(new Uint8Array(await crypto.subtle.sign('Ed25519', key, utf8(`${header}.${payload}`))))
     const jwt = `${header}.${payload}.${signature}`
 
-    this.cached = { audience, exp, jwt }
+    this.cached = { audience, agent, exp, jwt }
 
     return jwt
   }
