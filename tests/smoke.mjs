@@ -17,6 +17,13 @@ const text = (sel) => page.evaluate((s) => document.querySelector(`lws-shell ${s
 const click = (sel) => page.evaluate((s) => { const el = document.querySelector(`lws-shell ${s}`); if (!el) return false; el.click(); return true }, sel)
 const get = (url) => fetch(url).then(r => r.ok ? r.text() : null)
 
+// Restore the seed the checks assume (an earlier run's conflict step changes it).
+{
+  const url = `${STORAGE}notes/list.txt`
+  const etag = (await fetch(url, { method: 'HEAD' })).headers.get('etag')
+  await fetch(url, { method: 'PUT', headers: { 'content-type': 'text/plain', ...(etag ? { 'if-match': etag } : {}) }, body: 'milk\neggs' })
+}
+
 try {
   // --- read (milestone 1) ---------------------------------------------------
   await page.goto(`${SHELL}?storage=${encodeURIComponent(STORAGE)}#${STORAGE}`)

@@ -4,7 +4,7 @@ A browser for [W3C Linked Web Storage](https://github.com/w3c/lws-protocol) (LWS
 
 The shell is LWS-native: containers, data resources, the storage description, and (as they land) search, access grants, notifications and the LWS identity suites. For everything that SolidOS already does well — profiles, address books, chat, trackers, meetings, notepads — it mounts the [SolidOS panes](https://github.com/JavaScriptSolidServer/solidos-nobuild) as plugins: an adapter lets them read LWS storage through the store they already use, so they run unchanged.
 
-Status: **milestone 2** — browse, edit (conditional PUT, 412 on conflict) and create (folders, files) natively; SolidOS panes mounted on LWS containers and subjects, and they can create and edit through the store (chat `mintNew`, `updater.update` as read-modify-PUT).
+Status: **milestone 3** — browse, edit (conditional PUT, 412 on conflict) and create natively; SolidOS panes mounted on LWS containers and subjects, creating and editing through the store; **login** through the host's OpenID identity provider, after which writes carry the session (a chat message sent from the chat pane lands in LWS storage).
 
 ## Run it
 
@@ -20,7 +20,8 @@ python3 -m http.server 8738
 Open http://localhost:8738/?storage=http://127.0.0.1:8737/lws/. The import map, theme and panes come from `solidos-nobuild`; `?solidos=https://jss.live/solidos-nobuild/` uses the published copy instead of the local one.
 
 ```sh
-node tests/smoke.mjs      # milestone checks, headless Chromium
+node tests/smoke.mjs      # browse, edit, create, panes — against the anonymous server above
+node tests/login.mjs      # login + authenticated writes — against lwsd with auth on (see the file's header)
 ```
 
 ## Layout
@@ -44,7 +45,7 @@ node tests/smoke.mjs      # milestone checks, headless Chromium
 | Edit from panes (source, notepad, chat, trackers…) | PUT, N3 PATCH | conditional PUT (`If-Match`, else 428); no RDF PATCH | ✅ `writes.js`: ETags, read-modify-PUT; merge-patch for JSON resources still to do |
 | Create new things | PUT / POST + `ldp:BasicContainer` | POST + `Slug` + `Link` `lws#Container` / `DataResource` | ✅ native forms; panes' PUT-to-create and `createContainer` translated |
 | Mount SolidOS panes | — | pane interface `{ name, label, render, mintNew }` over the adapted store | ✅ folder and chat panes, picked by `label(subject)`; the full registry next |
-| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | next: authenticated `fetch` for the client (chat's send needs a user); did:key/CID provider |
+| Login | Solid-OIDC | OpenID suite (via the JSS host), did:key / CID self-issued JWTs | ✅ host OpenID via `solid-ui-provider`/`solid-ui-account`; the client shares the store's authenticated transport; did:key / CID provider still to do |
 | Sharing | WAC `.acl` editor | ODRL access requests / grants | new pane |
 | Discovery, "my things" | type indexes | `TypeIndexService` / `TypeSearchService` | new search pane |
 | Live updates | `Updates-Via` WebSocket | webhook subscriptions (RFC 9421 signed) | polling or a relay; open |

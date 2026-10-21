@@ -29,7 +29,19 @@ function currentStorage () {
 const storage = currentStorage()
 const isLws = (url) => url.startsWith(storage)
 const isLwsContainer = (url) => isLws(url) && url.endsWith('/')
-const client = new LwsClient()
+
+// The client shares the store's transport: solid-logic's authenticated fetch once
+// logged in, with the LWS write rules of writes.js applied (looked up per call, so
+// the wrapped version is used).
+const client = new LwsClient({ fetch: (url, init) => store.fetcher._fetch(url, init) })
+
+// Back from the identity provider: SolidAuth strips the hash before redirecting
+// and remembers it; put it back so the user lands where they were.
+try {
+  const remembered = localStorage.getItem('preLoginRedirectHash')
+
+  if (remembered && !location.hash) { localStorage.removeItem('preLoginRedirectHash'); location.hash = remembered }
+} catch {}
 
 installLwsAdapter(store, { client, isLwsContainer })
 installLwsWrites(store, { isLws })
@@ -95,16 +107,28 @@ export class LwsShell extends LitElement {
     this.available = []
   }
 
-  connectedCallback () {
+  async connectedCallback () {
     super.connectedCallback()
     window.addEventListener('hashchange', this.onHash)
     client.description(storage).then(d => { this.description = d }).catch(() => {})
+
+    // Let the session restore first (the <solid-ui-provider> around us runs
+    // authn.checkUser), so panes render with the user known; then follow logins
+    // and logouts by re-mounting the current pane.
+    const auth = this.closest('solid-ui-provider')?.auth
+
+    if (auth) {
+      if (!auth.initialized) await Promise.race([new Promise(resolve => { const off = auth.onSessionUpdated(() => { if (auth.initialized) { off(); resolve() } }) }), new Promise(resolve => setTimeout(resolve, 8000))])
+      this.unsubscribeAuth = auth.onSessionUpdated(() => { if (this.view === 'pane') { this.paneElement = null; this.mountPane(this.paneName) } })
+    }
+
     this.open(this.url)
   }
 
   disconnectedCallback () {
     super.disconnectedCallback()
     window.removeEventListener('hashchange', this.onHash)
+    this.unsubscribeAuth?.()
   }
 
   onHash = () => { this.open(location.hash.slice(1) || storage) }
@@ -228,6 +252,7 @@ export class LwsShell extends LitElement {
           <button>Open</button>
         </form>
         ${this.description ? html`<span title=${JSON.stringify(this.description).slice(0, 200)}>storage description ✓</span>` : nothing}
+        <solid-ui-account></solid-ui-account>
       </header>
       <nav aria-label="Breadcrumb">
         ${crumbs.map((c, i) => html`${i ? '›' : ''} <a href="#${c.url}">${c.label}</a>`)}
