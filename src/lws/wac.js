@@ -14,7 +14,12 @@
 // not shown; that is what the Sharing view is for.
 
 import { graph, parse, sym } from 'rdflib'
+import { authn } from 'solid-logic'
 import { LwsClient } from './client.js'
+import { DidKeyIdentity } from './didkey.js'
+
+/** The agent acting now: the OpenID WebID, else the did:key / CID held here. */
+const currentAgent = () => authn.currentUser()?.uri ?? DidKeyIdentity.load()?.agent ?? null
 
 const ACL = 'http://www.w3.org/ns/auth/acl#'
 const FOAF_AGENT = 'http://xmlns.com/foaf/0.1/Agent'
@@ -90,14 +95,18 @@ export class WacBridge {
     await new Promise((resolve, reject) => parse(turtle, kb, `${url}.acl`, 'text/turtle', (err) => err ? reject(err) : resolve()))
 
     // Wanted: assignee → set of actions, from authorizations that give access to url.
+    // The agent writing the document is left out: panes write an owner authorization
+    // (Read, Write, Control for the creator) beside everything they make, and on LWS
+    // the controller already has that — a grant per document would only pile up.
     const wanted = new Map()
+    const me = currentAgent()
 
     for (const auth of kb.each(null, sym(`${ACL}accessTo`), sym(url))) {
       const actions = new Set(kb.each(auth, sym(`${ACL}mode`)).flatMap(m => MODE_TO_ACTIONS[m.value.replace(ACL, '')] ?? []))
 
       if (!actions.size) continue
 
-      const agents = [...kb.each(auth, sym(`${ACL}agent`)).map(a => a.value), ...kb.each(auth, sym(`${ACL}agentClass`)).filter(c => c.value === FOAF_AGENT).map(() => FOAF_AGENT)]
+      const agents = [...kb.each(auth, sym(`${ACL}agent`)).map(a => a.value).filter(a => a !== me), ...kb.each(auth, sym(`${ACL}agentClass`)).filter(c => c.value === FOAF_AGENT).map(() => FOAF_AGENT)]
 
       for (const agent of agents) {
         if (!wanted.has(agent)) wanted.set(agent, new Set())
@@ -120,6 +129,9 @@ export class WacBridge {
     }
 
     for (const { grant, policy } of have) {
+      // Grants to the writer are not the document's business (see above): kept as they are.
+      if ([].concat(policy.assignee).length === 1 && [].concat(policy.assignee)[0] === me) continue
+
       const keep = [...wanted].some(([agent, actions]) => same(policy, agent, actions))
 
       // A grant with several policies is left alone unless this is its only one.

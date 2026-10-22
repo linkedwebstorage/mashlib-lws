@@ -81,6 +81,10 @@ try {
   await page.evaluate(() => document.querySelector('lws-shell .grants li button.revoke').click())
   await page.waitFor(() => !document.querySelector('lws-shell .grants li'), { timeout: 15000 }).catch(() => {})
 
+  // Clean up with the key still active (Forget comes after, below is anonymous).
+  const cleaned = await page.evaluate(async (urls) => { const { store } = await import('solid-logic'); const out = []; for (const u of urls) out.push((await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status); return out }, [`${STORAGE}${folder}/`, ...(cidUrl ? [cidUrl] : [])]).catch(() => [])
+  check(`the run's folder and CID document are deleted with the key (${cleaned.join(', ')})`, cleaned.every(s => s === 204))
+
   // The key survives a reload; Forget removes it.
   await page.reload()
   await page.waitFor(() => !!document.querySelector('lws-shell .identity'), { timeout: 30000 })
@@ -89,8 +93,6 @@ try {
   await page.waitFor(() => !!document.querySelector('lws-shell #use-key'), { timeout: 5000 })
   check('Forget key returns to anonymous', await page.evaluate(() => !localStorage.getItem('lws-didkey')))
 
-  await fetch(`${STORAGE}${folder}/`, { method: 'DELETE', headers: { depth: 'infinity' } }).catch(() => {})
-  if (cidUrl) await fetch(cidUrl, { method: 'DELETE' }).catch(() => {})
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))
 } catch (error) {

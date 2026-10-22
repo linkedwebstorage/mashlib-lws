@@ -223,7 +223,8 @@ try {
   check(`source pane: edited text saved to ${sourceUrl.replace(STORAGE, '')}`, sourceSaved)
 
   // Leave the storage as found: everything this run made lives under one folder.
-  await fetch(`${STORAGE}${folder}/`, { method: 'DELETE', headers: { depth: 'infinity' } }).catch(() => {})
+  const cleaned = await page.evaluate(async (u) => { try { const { store } = await import('solid-logic'); return (await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status } catch (e) { return 'threw: ' + e.message } }, `${STORAGE}${folder}/`).catch(e => 'evaluate threw: ' + e.message)
+  check(`the run's folder is deleted through the logged-in session (${cleaned})`, cleaned === 204)
 
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401|disjointUnionOf|allowed state list/.test(l))
   check('no uncaught errors', errors.length === 0, errors.slice(0, 2).join(' | ').slice(0, 300))

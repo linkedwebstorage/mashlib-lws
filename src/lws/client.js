@@ -132,13 +132,9 @@ export class LwsClient {
    * container of documents; each is fetched. Returns the documents (with absolute ids).
    */
   async accessDocuments (endpoint) {
-    const response = await this.fetch(endpoint, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+    const page = await this.allItems(endpoint)
 
-    if (!response.ok) throw new LwsError(response, endpoint)
-
-    const page = await response.json()
-
-    return Promise.all((page.items ?? []).map(async item => {
+    return Promise.all(page.map(async item => {
       const url = new URL(item.id, endpoint).href
       const doc = await this.fetch(url, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
 
@@ -159,13 +155,9 @@ export class LwsClient {
 
   /** Webhook subscriptions at the notification service: [{ url, topic, inbox, … }]. */
   async subscriptions (endpoint) {
-    const response = await this.fetch(endpoint, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+    const page = await this.allItems(endpoint)
 
-    if (!response.ok) throw new LwsError(response, endpoint)
-
-    const page = await response.json()
-
-    return Promise.all((page.items ?? []).map(async item => {
+    return Promise.all(page.map(async item => {
       const url = new URL(item.id, endpoint).href
       const doc = await this.fetch(url, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
 
@@ -180,6 +172,23 @@ export class LwsClient {
     if (!response.ok) throw new LwsError(response, endpoint)
 
     return response.json()
+  }
+
+  /** Every item of a service container (grants, requests, subscriptions), across its pages. */
+  async allItems (endpoint) {
+    const items = []
+    let next = endpoint
+
+    for (let pages = 0; next && pages < MAX_PAGES; pages++) {
+      const response = await this.fetch(new URL(next, endpoint).href, { headers: { accept: 'application/lws+json, application/ld+json, application/json' } })
+
+      if (!response.ok) throw new LwsError(response, endpoint)
+
+      items.push(...((await response.json()).items ?? []))
+      next = parseLinks(response.headers.get('link')).find(l => l.rel === 'next')?.href
+    }
+
+    return items
   }
 
   /** The resource's linkset document (rel="linkset" on a HEAD), or null. */
