@@ -82,7 +82,7 @@ try {
   await page.waitFor(() => !document.querySelector('lws-shell .grants li'), { timeout: 15000 }).catch(() => {})
 
   // Clean up with the key still active (Forget comes after, below is anonymous).
-  const cleaned = await page.evaluate(async (urls) => { const { store } = await import('solid-logic'); const out = []; for (const u of urls) out.push((await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status); return out }, [`${STORAGE}${folder}/`, ...(cidUrl ? [cidUrl] : [])]).catch(() => [])
+  const cleaned = await page.evaluate(async (urls) => { const { store } = await import('solid-logic'); const out = []; for (const u of urls) out.push((await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status); const { client } = await import(new URL('src/shell/context.js', location.href).href); const { LwsClient } = await import(new URL('src/lws/client.js', location.href).href); await client.revokeUnder(LwsClient.services(document.querySelector('lws-shell').description), urls[0]).catch(() => 0); return out }, [`${STORAGE}${folder}/`, ...(cidUrl ? [cidUrl] : [])]).catch(() => [])
   check(`the run's folder and CID document are deleted with the key (${cleaned.join(', ')})`, cleaned.every(s => s === 204))
 
   // The key survives a reload; Forget removes it.

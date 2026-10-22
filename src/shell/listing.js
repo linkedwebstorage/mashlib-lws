@@ -2,6 +2,7 @@
 // A mixin over the shell: methods and a render fragment, state lives on the shell.
 
 import { html, nothing } from 'lit'
+import { LwsClient } from '../lws/client.js'
 import { storage, client, registry, paneContext, parentOf, nameOf, minting } from './context.js'
 
 export const ListingMixin = (Base) => class extends Base {
@@ -15,7 +16,10 @@ export const ListingMixin = (Base) => class extends Base {
 
     try {
       await client.remove(item.url, { recursive: item.container })
-      this.notice = `Deleted ${name}`
+      // Grants that only targeted what is gone go with it.
+      const revoked = await client.revokeUnder(LwsClient.services(this.description), item.url).catch(() => 0)
+
+      this.notice = `Deleted ${name}${revoked ? ` and ${revoked} grant${revoked === 1 ? '' : 's'} on it` : ''}`
       this.listing = await client.container(this.url)
     } catch (error) {
       this.error = error.message

@@ -223,7 +223,9 @@ try {
   check(`source pane: edited text saved to ${sourceUrl.replace(STORAGE, '')}`, sourceSaved)
 
   // Leave the storage as found: everything this run made lives under one folder.
-  const cleaned = await page.evaluate(async (u) => { try { const { store } = await import('solid-logic'); return (await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status } catch (e) { return 'threw: ' + e.message } }, `${STORAGE}${folder}/`).catch(e => 'evaluate threw: ' + e.message)
+  const cleaned = await page.evaluate(async (u) => { try { const { store } = await import('solid-logic'); const status = (await store.fetcher._fetch(u, { method: 'DELETE', headers: { depth: 'infinity' } })).status; return status } catch (e) { return 'threw: ' + e.message } }, `${STORAGE}${folder}/`).catch(e => 'evaluate threw: ' + e.message)
+  const revoked = await page.evaluate(async (u) => { const { client } = await import(new URL('src/shell/context.js', location.href).href); const { LwsClient } = await import(new URL('src/lws/client.js', location.href).href); return client.revokeUnder(LwsClient.services(document.querySelector('lws-shell').description), u) }, `${STORAGE}${folder}/`).catch(e => 'threw: ' + e.message)
+  console.log(`cleanup: grants revoked under the run's folder: ${revoked}`)
   check(`the run's folder is deleted through the logged-in session (${cleaned})`, cleaned === 204)
 
   const errors = page.console.filter(l => /^(exception|error)/.test(l) && !/preferences|Session restore|401|disjointUnionOf|allowed state list/.test(l))

@@ -144,6 +144,26 @@ export class LwsClient {
     }))
   }
 
+  /**
+   * Revoke the grants (and withdraw the requests) whose targets all lie under `prefix`
+   * — what a deleted resource or container leaves behind. Returns the number removed.
+   */
+  async revokeUnder (endpoints, prefix) {
+    let removed = 0
+
+    for (const endpoint of [endpoints.AccessGrantService, endpoints.AccessRequestService].filter(Boolean)) {
+      for (const doc of await this.accessDocuments(endpoint).catch(() => [])) {
+        const targets = [].concat(doc.access ?? []).flatMap(p => [].concat(p.target?.value ?? []))
+
+        if (targets.length && targets.every(t => t === prefix || t.startsWith(prefix))) {
+          if ((await this.fetch(doc.id, { method: 'DELETE' })).ok) removed++
+        }
+      }
+    }
+
+    return removed
+  }
+
   /** POST an AccessGrant or AccessRequest document to its service. Returns the stored document. */
   async createAccessDocument (endpoint, doc) {
     const response = await this.fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/lws+json' }, body: JSON.stringify({ '@context': ['https://www.w3.org/ns/lws/v1'], ...doc }) })
